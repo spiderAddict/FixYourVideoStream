@@ -1,2 +1,1 @@
-# FixYourVideoStream
-Manage streams available in a video file
+<PASTE THE README.MD CODE FROM CANVAS HERE>
