@@ -1,0 +1,23 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "FastAPI Debug",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "uvicorn",
+      "args": [
+        "backend.main:app",
+        "--reload",
+        "--host", "127.0.0.1",
+        "--port", "8000"
+      ],
+      "env": {
+        "VIDEOS_DIR": "${workspaceFolder}/videos",
+        "DB_PATH": "${workspaceFolder}/app.db"
+      },
+      "jinja": true,
+      "console": "integratedTerminal"
+    }
+  ]
+}

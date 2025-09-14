@@ -1,1 +1,131 @@
-<PASTE THE STYLES.CSS CODE FROM CANVAS HERE>
+body {
+    font-family: Arial, Helvetica, sans-serif;
+    margin: 20px
+}
+
+.container {
+    max-width: 900px
+}
+
+.file-list {
+    list-style: none;
+    padding: 0
+}
+
+.file-item {
+    display: flex;
+    gap: 12px;
+    padding: 8px;
+    border-bottom: 1px solid #ddd;
+    cursor: pointer
+}
+
+.status {
+    width: 20px
+}
+
+.pane {
+    border: 1px solid #ccc;
+    padding: 12px;
+    margin-top: 12px
+}
+
+.hidden {
+    display: none
+}
+
+.controls {
+    margin-bottom: 12px
+}
+
+.detail-pane {
+  position: sticky;
+  top: 1rem;      /* distance par rapport au haut de la fenêtre */
+  max-height: calc(100vh - 2rem);
+  overflow-y: auto;
+}
+
+/* Base */
+.file-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.5rem;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.file-item:hover {
+  opacity: 0.9;
+}
+
+
+/* Thème Plex */
+body[data-theme="plex"] {
+  background: #1c1c1c;
+  color: #f5c518;
+}
+
+/* Thème Plex */
+body[data-theme="plex"] .file-item {
+  background: #2c2c2c;
+  color: #f5c518;
+}
+
+body[data-theme="plex"] .file-item:hover {
+  background: #3a3a3a;
+}
+
+/* Thème Sonarr */
+body[data-theme="sonarr"] {
+  background: #0b1e2d;
+  color: #00aaff;
+}
+body[data-theme="sonarr"] .file-item:hover {
+  background: #12344a;
+}
+
+/* Thème Jellyfin */
+body[data-theme="jellyfin"] {
+  background: #0d1117;
+  color: #9b59b6;
+}
+body[data-theme="jellyfin"] .file-item:hover {
+  background: #1a1f27;
+}
+
+/* Pour que les box gardent un contraste lisible */
+body[data-theme] .box {
+  background: #fff;
+  color: #000;
+}
+
+/* Tags toujours lisibles */
+.file-item .tag {
+  margin-left: 0.3rem;
+}
+
+.notification-container {
+  position: fixed;
+  left: 20px;
+  bottom: 20px;
+  z-index: 1000;
+  min-width: 250px;
+  max-width: 350px;
+}
+.notification-message {
+  margin-bottom: 10px;
+  padding: 16px 24px;
+  border-radius: 6px;
+  color: #fff;
+  background: #363636;
+  opacity: 0.95;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+  animation: fadein 0.3s;
+}
+.notification-message.success { background: #48c774; }
+.notification-message.error { background: #f14668; }
+@keyframes fadein {
+  from { opacity: 0; transform: translateY(30px);}
+  to { opacity: 0.95; transform: translateY(0);}
+}

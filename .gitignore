@@ -1,0 +1,5 @@
+backend/__pycache__/*
+venv/*
+test_videos/*
+videos/*
+app.db

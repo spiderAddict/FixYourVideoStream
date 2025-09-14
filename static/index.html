@@ -1,1 +1,83 @@
-<PASTE THE INDEX.HTML CODE FROM CANVAS HERE>
+<!DOCTYPE html>
+<html lang="fr">
+
+<head>
+  <meta charset="UTF-8">
+  <title>Analyseur de vidéos</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bulma@0.9.4/css/bulma.min.css">
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+
+<body>
+  <section class="section">
+    <div class="container">
+
+      <!-- Header -->
+      <div class="level">
+        <div class="level-right">
+          <div class="select">
+            <select id="themeSelector">
+              <option value="plex">Plex</option>
+              <option value="sonarr">Sonarr</option>
+              <option value="jellyfin">Jellyfin</option>
+            </select>
+          </div>
+        </div>
+      </div>
+      <div class="level">
+        <div class="level-right buttons">
+          <button class="button is-link" id="analyzeAll">Analyser tout</button>
+          <button class="button is-info" id="analyzeNew">Analyser nouveaux</button>
+        </div>
+      </div>
+
+      <!-- Layout en colonnes -->
+      <div class="columns">
+        <!-- Colonne gauche : liste -->
+        <div class="column is-half">
+          <div class="box">
+            <h2 class="title is-4">Fichiers vidéos</h2>
+            <ul id="fileList" class="menu-list"></ul>
+          </div>
+        </div>
+
+        <!-- Colonne droite : détail -->
+        <div class="column is-half">
+          <div id="detailPane" class="box is-hidden detail-pane"></div>
+        </div>
+      </div>
+
+      <!-- Templates -->
+      <script type="text/template" id="list-item-template">
+      <a class="file-item" data-id="{{id}}">
+        <span class="icon-text">
+          <span>{{filename}}</span>
+          <span class="tags ml-2">
+            {{status}}
+            {{language}}
+          </span>
+        </span>
+      </a>
+    </script>
+
+      <script type="text/template" id="detail-template">
+      <h3 class="title is-5">{{filename}}</h3>
+      <div class="content">
+        <p><strong>Path :</strong> <code>{{path}}</code></p>
+        <p><strong>Analysé :</strong> {{analyzed}}</p>
+        <p><strong>Langue :</strong> {{language}}</p>
+      </div>
+      <div class="buttons">
+        <button id="analyze" class="button is-link">🔄 Analyser</button>
+        <button id="setFr" class="button is-warning">🇫🇷 Forcer FR</button>
+      </div>
+    </script>
+
+    </div>
+  </section>
+
+  <div id="notification-container" class="notification-container"></div>
+  <script src="/static/app.js"></script>
+</body>
+
+</html>

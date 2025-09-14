@@ -7,6 +7,7 @@ output_dir.mkdir(exist_ok=True)
 files = [
     ("video_fr.mp4", "fra"),
     ("video_en.mkv", "eng"),
+    ("video_fr.mkv", "fr"),
     ("video_es.avi", "spa"),
     ("video_unknown.mov", None),
 ]
