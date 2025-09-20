@@ -37,7 +37,57 @@
         <div class="column is-half">
           <div class="box">
             <h2 class="title is-4">Fichiers vidéos</h2>
-            <ul id="fileList" class="menu-list"></ul>
+            <div class="level mb-3">
+              <div class="level-left">
+                <div class="select mr-2">
+                  <select id="filterStatus">
+                    <option value="">Tous les statuts</option>
+                    <option value="analyzed">Analysé</option>
+                    <option value="not_analyzed">Non analysé</option>
+                  </select>
+                </div>
+                <div class="select">
+                  <select id="filterLang">
+                    <option value="">Toutes les langues</option>
+                    <option value="fr">Français</option>
+                    <option value="en">Anglais</option>
+                    <option value="es">Espagnol</option>
+                    <!-- Ajoute d'autres langues si besoin -->
+                  </select>
+                </div>
+              </div>
+            </div>
+            <div class="table-container">
+              <table class="table is-fullwidth is-striped">
+                <thead>
+                  <tr>
+                    <th>Nom</th>
+                    <th>Statut</th>
+                    <th>Langue</th>
+                  </tr>
+                </thead>
+                <tbody id="fileList"></tbody>
+              </table>
+            </div>
+            <div class="level mt-2">
+              <div class="level-left">
+                <div class="select">
+                  <select id="pageSize">
+                    <option value="10">10</option>
+                    <option value="25">25</option>
+                    <option value="50">50</option>
+                    <option value="100">100</option>
+                  </select>
+                </div>
+              </div>
+              <div class="level-right">
+                <nav class="pagination" role="navigation" aria-label="pagination">
+                  <a class="pagination-previous" id="prevPage">Précédent</a>
+                  <a class="pagination-next" id="nextPage">Suivant</a>
+                  <ul class="pagination-list" id="paginationList"></ul>
+                </nav>
+              </div>
+            </div>
           </div>
         </div>
 

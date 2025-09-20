@@ -17,12 +17,69 @@ function renderTemplate(templateId, data){
   return tpl;
 }
 
-async function loadList(){
+let allFiles = [];
+let currentPage = 1;
+let pageSize = 10;
+
+function renderPagination(total, page, pageSize) {
+  const pageCount = Math.ceil(total / pageSize);
+  const paginationList = document.getElementById('paginationList');
+  paginationList.innerHTML = '';
+  for (let i = 1; i <= pageCount; i++) {
+    const li = document.createElement('li');
+    li.innerHTML = `<a class="pagination-link${i === page ? ' is-current' : ''}" data-page="${i}">${i}</a>`;
+    paginationList.appendChild(li);
+  }
+  document.getElementById('prevPage').disabled = (page === 1);
+  document.getElementById('nextPage').disabled = (page === pageCount || pageCount === 0);
+
+  // Ajout des événements
+  paginationList.querySelectorAll('.pagination-link').forEach(link => {
+    link.onclick = (e) => {
+      currentPage = parseInt(e.target.dataset.page);
+      renderList();
+    };
+  });
+  document.getElementById('prevPage').onclick = () => {
+    if (currentPage > 1) {
+      currentPage--;
+      renderList();
+    }
+  };
+  document.getElementById('nextPage').onclick = () => {
+    const pageCount = Math.ceil(allFiles.length / pageSize);
+    if (currentPage < pageCount) {
+      currentPage++;
+      renderList();
+    }
+  };
+}
+
+function getFilteredFiles() {
+  const status = document.getElementById('filterStatus').value;
+  const lang = document.getElementById('filterLang').value;
+
+  return allFiles.filter(f => {
+    let statusOk = true;
+    let langOk = true;
+
+    if (status === "analyzed") statusOk = !!f.analyzed_at;
+    if (status === "not_analyzed") statusOk = !f.analyzed_at;
+    if (lang) langOk = (f.language === lang);
+
+    return statusOk && langOk;
+  });
+}
+
+function renderList() {
   const list = document.getElementById('fileList');
   list.innerHTML = "";
-  const files = await api('/api/files');
+  const filteredFiles = getFilteredFiles();
+  const start = (currentPage - 1) * pageSize;
+  const end = start + pageSize;
+  const files = filteredFiles.slice(start, end);
 
-  for (let f of files){
+  for (let f of files) {
     const statusTag = f.analyzed_at
       ? `<span class="tag is-success">✓</span>`
       : `<span class="tag is-warning">⏳</span>`;
@@ -31,19 +88,44 @@ async function loadList(){
       ? `<span class="tag is-info">${f.language}</span>`
       : `<span class="tag is-light">?</span>`;
 
-    const html = renderTemplate("list-item-template", {
-      id: f.id,
-      filename: f.filename,
-      status: statusTag,
-      language: langTag
-    });
+    const html = `
+      <tr>
+        <td>
+          <a class="file-item" data-id="${f.id}" style="cursor:pointer">${f.filename}</a>
+        </td>
+        <td>${statusTag}</td>
+        <td>${langTag}</td>
+      </tr>
+    `;
 
-    const wrapper = document.createElement("li");
+    const wrapper = document.createElement("tr");
     wrapper.innerHTML = html;
-    wrapper.querySelector("a").onclick = ()=>showDetail(f);
+    wrapper.querySelector(".file-item").onclick = () => showDetail(f);
     list.appendChild(wrapper);
   }
+  renderPagination(filteredFiles.length, currentPage, pageSize);
 }
+
+// Mets à jour la liste quand on change un filtre
+document.addEventListener('DOMContentLoaded', () => {
+  const pageSizeSelect = document.getElementById('pageSize');
+  if (pageSizeSelect) {
+    pageSizeSelect.value = pageSize;
+    pageSizeSelect.onchange = (e) => {
+      pageSize = parseInt(e.target.value);
+      currentPage = 1;
+      renderList();
+    };
+  }
+  document.getElementById('filterStatus').onchange = () => {
+    currentPage = 1;
+    renderList();
+  };
+  document.getElementById('filterLang').onchange = () => {
+    currentPage = 1;
+    renderList();
+  };
+});
 
 async function showDetail(file){
   const pane = document.getElementById('detailPane');
@@ -117,6 +199,15 @@ async function loadTheme(){
   document.getElementById('themeSelector').value = res.theme;
 }
 
+async function loadList() {
+  try {
+    allFiles = await api('/api/files');
+    currentPage = 1;
+    renderList();
+  } catch (e) {
+    showNotification("Erreur lors du chargement de la liste : " + e.message, "error");
+  }
+}
 document.getElementById('themeSelector').onchange = async (e)=>{
   const theme = e.target.value;
   await api('/api/theme', {
@@ -129,9 +220,10 @@ document.getElementById('themeSelector').onchange = async (e)=>{
 };
 
 // Charger la liste et le thème au démarrage
-loadList().catch(e=>console.error(e));
-loadTheme().catch(e=>console.error(e));
-
+document.addEventListener('DOMContentLoaded', () => {
+  loadList().catch(e => console.error(e));
+  loadTheme().catch(e => console.error(e));
+});
 
 /**
  * Afficher une notification temporaire
