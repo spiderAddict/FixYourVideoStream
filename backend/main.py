@@ -253,7 +253,8 @@ class AnalyseModel(BaseModel):
     filename : str
     
 @app.post('/api/files/analyze')
-def reanalyze(model: AnalyseModel):
+def analyze_one(model: AnalyseModel):
+    logger.info(f"Analyse du fichier audio avec ffprobe: {model.path}")
     lang = ffprobe_get_audio_language(model.path)
     analyzed_at = datetime.utcnow().isoformat()
     conn = get_conn()
@@ -264,6 +265,7 @@ def reanalyze(model: AnalyseModel):
         )
     conn.commit()
     conn.close()
+    logger.info(f"Analyse du fichier audio effectué: {lang}")
     return {'status': 'ok', 'language': lang}
 
 @app.post('/api/files/{file_id}/reanalyze')
