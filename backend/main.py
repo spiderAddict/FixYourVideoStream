@@ -14,6 +14,7 @@ from pathlib import Path
 
 VIDEOS_DIR = os.environ.get("VIDEOS_DIR", "/videos")
 DB_PATH = os.environ.get("DB_PATH", "app.db")
+VERSION_FILE = os.path.join(os.path.dirname(os.path.dirname(__file__)), "VERSION")
 
 VIDEO_EXTS = {'.mp4', '.mkv', '.avi', '.mov', '.webm', '.m4v'}
 
@@ -27,9 +28,24 @@ logger = logging.getLogger(__name__)
 app = FastAPI()
 app.mount('/static', StaticFiles(directory="static", html=True), name="static")
 
+def get_version():
+    """Retourne la version de l'application"""
+    try:
+        if os.path.exists(VERSION_FILE):
+            with open(VERSION_FILE, 'r') as f:
+                return f.read().strip()
+    except:
+        pass
+    return "unknown"
+
 @app.get("/")
 def root():
     return FileResponse("static/index.html")
+
+@app.get("/api/version")
+def get_app_version():
+    """API endpoint pour obtenir la version de l'application"""
+    return {'version': get_version()}
 
 # -------------------------
 # Base de données SQLite
