@@ -41,5 +41,5 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           context: . 
           push: true
-      build-args: |
-        APP_VERSION=${{ github.ref_name }}
+          build-args: |
+            APP_VERSION=${{ github.ref_name }}
