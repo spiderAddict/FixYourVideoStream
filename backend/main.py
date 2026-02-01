@@ -132,32 +132,19 @@ def list_files(name: str = Query(None, description="Filtre sur le nom du fichier
     conn = get_conn()
     c = conn.cursor()
     c.execute('SELECT id, path, filename, language, analyzed_at FROM files')
-    rows = {r['path']: dict(r) for r in c.fetchall()}
+    rows = c.fetchall()
     conn.close()
 
     result = []
-    for f in scan_directory():
-        pathstr = str(f)
-        if pathstr in rows:
-            r = rows[pathstr]
-            item = {
-                'id': r['id'],
-                'filename': r['filename'],
-                'path': r['path'],
-                'language': r['language'],
-                'analyzed_at': r['analyzed_at'],
-                'analyzed': bool(r['analyzed_at'])
-            }
-        else:
-            # Fichier pas encore en base
-            item = {
-                'id': None,
-                'filename': f.name,
-                'path': pathstr,
-                'language': None,
-                'analyzed_at': None,
-                'analyzed': False
-            }
+    for r in rows:
+        item = {
+            'id': r['id'],
+            'filename': r['filename'],
+            'path': r['path'],
+            'language': r['language'],
+            'analyzed_at': r['analyzed_at'],
+            'analyzed': bool(r['analyzed_at'])
+        }
         if name is None or name.lower() in item['filename'].lower():
             result.append(item)
     return sorted(result, key=lambda x: x['filename'])
