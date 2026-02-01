@@ -210,17 +210,10 @@ def analyze_all():
         
         # Créer un nouveau cursor pour les UPDATE/INSERT
         c2 = conn.cursor()
-        c2.execute('SELECT id FROM files WHERE path=?', (file_path,))
-        if c2.fetchone():
-            c2.execute(
-                'UPDATE files SET filename=?, language=?, analyzed_at=? WHERE path=?',
-                (file_filename, lang, analyzed_at, file_path)
-            )
-        else:
-            c2.execute(
-                'INSERT INTO files (path, filename, language, analyzed_at) VALUES (?,?,?,?)',
-                (file_path, file_filename, lang, analyzed_at)
-            )
+        c2.execute(
+            'INSERT OR REPLACE INTO files (path, filename, language, analyzed_at) VALUES (?,?,?,?)',
+            (file_path, file_filename, lang, analyzed_at)
+        )
         c2.close()
     conn.commit()
     conn.close()
@@ -255,7 +248,7 @@ def analyze_new():
     
 @app.post('/api/files/{file_id}/analyze')
 def analyze_one(file_id: int):
-    logger.info(f"Analyse du fichier audio avec ffprobe: {file_id}")
+    logger.info(f"Demande d'analyse du fichier audio ({file_id})")
 
     # Récupère le chemin du fichier depuis la base
     conn = get_conn()
@@ -288,7 +281,7 @@ def analyze_one(file_id: int):
 
 @app.post('/api/files/{file_id}/reanalyze')
 def reanalyze(file_id: int):
-    logger.info(f"Demande de re-Analyse du fichier: {file_id}")
+    logger.info(f"Demande de re-analyse du fichier audio ({file_id})")
         
     # Récupère le chemin du fichier depuis la base
     conn = get_conn()
@@ -324,6 +317,8 @@ class SetLangModel(BaseModel):
     
 @app.post('/api/files/{file_id}/set_language')
 def set_language(file_id: int, model: SetLangModel):
+    logger.info(f"Demande de changement de langue du fichier audio ({file_id})")
+
     conn = get_conn()
     c = conn.cursor()
     c.execute('SELECT path FROM files WHERE id=?', (file_id,))
