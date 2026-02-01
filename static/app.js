@@ -1,4 +1,14 @@
 // static/app.js
+
+// Fonctions pour gérer le loader
+function showLoader() {
+  document.getElementById('loadingOverlay').classList.remove('is-hidden');
+}
+
+function hideLoader() {
+  document.getElementById('loadingOverlay').classList.add('is-hidden');
+}
+
 async function api(url, opts) {
     const r = await fetch(url, opts);
     if (!r.ok) {
@@ -156,20 +166,34 @@ async function showDetail(file){
   // Si le fichier n'a pas été analysé, proposer de le réanalyser
   if (file.analyzed_at){
     document.getElementById('analyze').onclick = async ()=>{
-      await api(`/api/files/${file.id}/reanalyze`, {method:'POST'});
-      await loadList();
-      showDetail(file);
+      try {
+        showLoader();
+        await api(`/api/files/${file.id}/reanalyze`, {method:'POST'});
+        await loadList();
+        showDetail(file);
+      } catch (e) {
+        showNotification("Erreur : " + e.message, "error");
+      } finally {
+        hideLoader();
+      }
     };
   }
   else {
      document.getElementById('analyze').onclick = async ()=>{
-      await api(`/api/files/analyze`, {
-        method:'POST',
-        headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({path:`${file.path}`,filename: `${file.filename}`}),
-      });
-      await loadList();
-      showDetail(file);
+      try {
+        showLoader();
+        await api(`/api/files/analyze`, {
+          method:'POST',
+          headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({path:`${file.path}`,filename: `${file.filename}`}),
+        });
+        await loadList();
+        showDetail(file);
+      } catch (e) {
+        showNotification("Erreur : " + e.message, "error");
+      } finally {
+        hideLoader();
+      }
     };
   }
 
@@ -177,13 +201,20 @@ async function showDetail(file){
   if (file.analyzed_at)
   {
     document.getElementById('setFr').onclick = async ()=>{
-      await api(`/api/files/${file.id}/set_language`, {
-        method:'POST',
-        headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({language:'fra'})
-      });
-      await loadList();
-      showDetail(file);
+      try {
+        showLoader();
+        await api(`/api/files/${file.id}/set_language`, {
+          method:'POST',
+          headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({language:'fra'})
+        });
+        await loadList();
+        showDetail(file);
+      } catch (e) {
+        showNotification("Erreur : " + e.message, "error");
+      } finally {
+        hideLoader();
+      }
     };
   }
   else 
@@ -191,18 +222,39 @@ async function showDetail(file){
 }
 
 document.getElementById('analyzeAll').onclick = async () => {
-    await api('/api/analyze_all', { method: 'POST' });
-    await loadList();
+    try {
+      showLoader();
+      await api('/api/analyze_all', { method: 'POST' });
+      await loadList();
+    } catch (e) {
+      showNotification("Erreur : " + e.message, "error");
+    } finally {
+      hideLoader();
+    }
 };
 
 document.getElementById('rescan').onclick = async () => {
-    await api('/api/rescan', { method: 'POST' });
-    await loadList();
+    try {
+      showLoader();
+      await api('/api/rescan', { method: 'POST' });
+      await loadList();
+    } catch (e) {
+      showNotification("Erreur : " + e.message, "error");
+    } finally {
+      hideLoader();
+    }
 };
 
 document.getElementById('analyzeNew').onclick = async () => {
-    await api('/api/analyze_new', { method: 'POST' });
-    await loadList();
+    try {
+      showLoader();
+      await api('/api/analyze_new', { method: 'POST' });
+      await loadList();
+    } catch (e) {
+      showNotification("Erreur : " + e.message, "error");
+    } finally {
+      hideLoader();
+    }
 };
 
 async function loadTheme(){
