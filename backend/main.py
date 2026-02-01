@@ -164,6 +164,7 @@ def list_files(name: str = Query(None, description="Filtre sur le nom du fichier
 
 @app.get('/api/files/{file_id}')
 def get_file(file_id: int):
+
     conn = get_conn()
     c = conn.cursor()
     c.execute('SELECT id, filename, path, language, analyzed_at FROM files WHERE id=?', (file_id,))
@@ -174,76 +175,93 @@ def get_file(file_id: int):
         raise HTTPException(status_code=404, detail='File not found')
     return dict(r)
 
-@app.post('/api/analyze_all')
-def analyze_all():
-    logger.info("Analyser tous les fichiers dans {VIDEOS_DIR}")
+@app.post('/api/rescan')
+def analyze_new():
+    logger.info(f"Analyser tous les fichiers dans {VIDEOS_DIR}")
     files = scan_directory()
     conn = get_conn()
     c = conn.cursor()
+
+    count = 0
+
     for f in files:
         pathstr = str(f)
         filename = f.name
-        lang = ffprobe_get_audio_language(pathstr)
-        analyzed_at = datetime.utcnow().isoformat()
         c.execute('SELECT id FROM files WHERE path=?', (pathstr,))
+        if c.fetchone():
+            continue  # déjà en base
+        else:
+            c.execute(
+                'INSERT INTO files (path, filename) VALUES (?,?)',
+                (pathstr, filename)
+            )
+            count += 1
+    conn.commit()
+    conn.close()
+
+    conn = get_conn()
+    c = conn.cursor()
+    return {'status': 'ok', 'count': count}
+    
+
+@app.post('/api/analyze_all')
+def analyze_all():
+    logger.info("Analyser tous les fichiers")
+    
+    conn = get_conn()
+    c = conn.cursor()
+    # Parcours les fichiers déjà en base
+    c.execute('SELECT id, path, filename FROM files')
+    files = c.fetchall()
+    count = len(files) 
+
+    for file in files:
+        file_id = file['id']
+        file_path = file['path']
+        file_filename = file['filename']
+        lang = ffprobe_get_audio_language(file_path)
+        analyzed_at = datetime.utcnow().isoformat()
+        c.execute('SELECT id FROM files WHERE path=?', (file_path,))
         if c.fetchone():
             c.execute(
                 'UPDATE files SET filename=?, language=?, analyzed_at=? WHERE path=?',
-                (filename, lang, analyzed_at, pathstr)
+                (file_filename, lang, analyzed_at, file_path)
             )
         else:
             c.execute(
                 'INSERT INTO files (path, filename, language, analyzed_at) VALUES (?,?,?,?)',
-                (pathstr, filename, lang, analyzed_at)
+                (file_path, file_filename, lang, analyzed_at)
             )
     conn.commit()
     conn.close()
-    return {'status': 'ok', 'count': len(files)}
+    return {'status': 'ok', 'count': count}
 
 @app.post('/api/analyze_new')
-def analyze_new():
-    files = scan_directory()
+def analyze_new():        
+    logger.info("Analyser tous les fichiers pas encore analysé")
+    
     conn = get_conn()
     c = conn.cursor()
-    new_count = 0
-    for f in files:
-        pathstr = str(f)
-        c.execute('SELECT id FROM files WHERE path=?', (pathstr,))
-        if c.fetchone():
-            continue
-        filename = f.name
-        lang = ffprobe_get_audio_language(pathstr)
+    # Parcours les fichiers déjà en base, mais non analysés, analyzed_at == null    
+    c.execute('SELECT id, path, filename FROM files WHERE analyzed_at IS NULL')
+    files = c.fetchall()
+    count = len(files)
+
+    for file in files:
+        file_id = file['id']
+        file_path = file['path']
+        file_filename = file['filename']
+        lang = ffprobe_get_audio_language(file_path)
         analyzed_at = datetime.utcnow().isoformat()
         c.execute(
             'INSERT INTO files (path, filename, language, analyzed_at) VALUES (?,?,?,?)',
-            (pathstr, filename, lang, analyzed_at)
+            (file_path, file_filename, lang, analyzed_at)
         )
-        new_count += 1
     conn.commit()
     conn.close()
-    return {'status': 'ok', 'new': new_count}
-
-
-    files = scan_directory()
     conn = get_conn()
     c = conn.cursor()
-    new_count = 0
-    for f in files:
-        pathstr = str(f)
-        c.execute('SELECT id FROM files WHERE path=?', (pathstr,))
-        if c.fetchone():
-            continue
-        filename = f.name
-        lang = ffprobe_get_audio_language(pathstr)
-        analyzed_at = datetime.utcnow().isoformat()
-        c.execute(
-            'INSERT INTO files (path, filename, language, analyzed_at) VALUES (?,?,?,?)',
-            (pathstr, filename, lang, analyzed_at)
-        )
-        new_count += 1
-    conn.commit()
-    conn.close()
-    return {'status': 'ok', 'new': new_count}
+    return {'status': 'ok', 'count': count}
 
 # -------------------------
 # Modèle Pydantic

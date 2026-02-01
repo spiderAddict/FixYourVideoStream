@@ -195,6 +195,11 @@ document.getElementById('analyzeAll').onclick = async () => {
     await loadList();
 };
 
+document.getElementById('rescan').onclick = async () => {
+    await api('/api/rescan', { method: 'POST' });
+    await loadList();
+};
+
 document.getElementById('analyzeNew').onclick = async () => {
     await api('/api/analyze_new', { method: 'POST' });
     await loadList();
