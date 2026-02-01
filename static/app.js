@@ -58,16 +58,19 @@ function renderPagination(total, page, pageSize) {
 function getFilteredFiles() {
   const status = document.getElementById('filterStatus').value;
   const lang = document.getElementById('filterLang').value;
+  const name = document.getElementById('filterName').value.toLowerCase();
 
   return allFiles.filter(f => {
     let statusOk = true;
     let langOk = true;
+    let nameOk = true;
 
     if (status === "analyzed") statusOk = !!f.analyzed_at;
     if (status === "not_analyzed") statusOk = !f.analyzed_at;
     if (lang) langOk = (f.language === lang);
+    if (name) nameOk = f.filename.toLowerCase().includes(name);
 
-    return statusOk && langOk;
+    return statusOk && langOk && nameOk;
   });
 }
 
@@ -122,6 +125,10 @@ document.addEventListener('DOMContentLoaded', () => {
     renderList();
   };
   document.getElementById('filterLang').onchange = () => {
+    currentPage = 1;
+    renderList();
+  };
+  document.getElementById('filterName').oninput = () => {
     currentPage = 1;
     renderList();
   };

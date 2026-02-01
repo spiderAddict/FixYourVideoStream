@@ -5,7 +5,7 @@ import json
 import tempfile
 import shutil
 import logging
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -128,7 +128,7 @@ def set_theme(model: ThemeModel):
 # Endpoints API
 # -------------------------
 @app.get('/api/files')
-def list_files():
+def list_files(name: str = Query(None, description="Filtre sur le nom du fichier")):
     conn = get_conn()
     c = conn.cursor()
     c.execute('SELECT id, path, filename, language, analyzed_at FROM files')
@@ -140,24 +140,26 @@ def list_files():
         pathstr = str(f)
         if pathstr in rows:
             r = rows[pathstr]
-            result.append({
+            item = {
                 'id': r['id'],
                 'filename': r['filename'],
                 'path': r['path'],
                 'language': r['language'],
                 'analyzed_at': r['analyzed_at'],
                 'analyzed': bool(r['analyzed_at'])
-            })
+            }
         else:
             # Fichier pas encore en base
-            result.append({
+            item = {
                 'id': None,
                 'filename': f.name,
                 'path': pathstr,
                 'language': None,
                 'analyzed_at': None,
                 'analyzed': False
-            })
+            }
+        if name is None or name.lower() in item['filename'].lower():
+            result.append(item)
     return sorted(result, key=lambda x: x['filename'])
 
 @app.get('/api/files/{file_id}')
