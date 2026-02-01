@@ -252,27 +252,37 @@ def analyze_new():
     conn.commit()
     conn.close()
     return {'status': 'ok', 'count': count}
-
-# -------------------------
-# Modèle Pydantic
-# -------------------------
-class AnalyseModel(BaseModel):
-    path: str
-    filename : str
     
-@app.post('/api/files/analyze')
-def analyze_one(model: AnalyseModel):
-    logger.info(f"Analyse du fichier audio avec ffprobe: {model.path}")
-    lang = ffprobe_get_audio_language(model.path)
+@app.post('/api/files/{file_id}/analyze')
+def analyze_one(file_id: int):
+    logger.info(f"Analyse du fichier audio avec ffprobe: {file_id}")
+
+    # Récupère le chemin du fichier depuis la base
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute('SELECT path FROM files WHERE id=?', (file_id,))
+    r = c.fetchone()
+    if not r:
+        conn.close()
+        logger.error(f"Fichier non trouvé pour analyse: id={file_id}")
+        raise HTTPException(status_code=404, detail='File not found')
+    path = r['path']
+
+    # Analyse le fichier avec ffprobe
+    lang = ffprobe_get_audio_language(path)
+
+    # Mise à jour de la base
     analyzed_at = datetime.utcnow().isoformat()
+    logger.debug(f"Langue du fichier audio: {lang}")
     conn = get_conn()
     c = conn.cursor()
     c.execute(
-            'INSERT INTO files (path, filename, language, analyzed_at) VALUES (?,?,?,?)',
-            (model.path, model.filename, lang, analyzed_at)
+            'UPDATE files SET language=?, analyzed_at=? WHERE id=?',
+            (lang, analyzed_at, file_id)
         )
     conn.commit()
     conn.close()
+
     logger.info(f"Analyse du fichier audio effectué: {lang}")
     return {'status': 'ok', 'language': lang}
 
@@ -280,6 +290,7 @@ def analyze_one(model: AnalyseModel):
 def reanalyze(file_id: int):
     logger.info(f"Demande de re-Analyse du fichier: {file_id}")
         
+    # Récupère le chemin du fichier depuis la base
     conn = get_conn()
     c = conn.cursor()
     c.execute('SELECT path FROM files WHERE id=?', (file_id,))
@@ -289,15 +300,20 @@ def reanalyze(file_id: int):
         logger.error(f"Fichier non trouvé pour reanalyse: id={file_id}")
         raise HTTPException(status_code=404, detail='File not found')
     path = r['path']
+
+    # Analyse le fichier avec ffprobe
     logger.info(f"Re-Analyse du fichier audio avec ffprobe: {path}")
     lang = ffprobe_get_audio_language(path)
+
+    # Mise à jour de la base
     analyzed_at = datetime.utcnow().isoformat()
     logger.debug(f"Langue du fichier audio: {lang}")
     c.execute('UPDATE files SET language=?, analyzed_at=? WHERE id=?',
               (lang, analyzed_at, file_id))
     conn.commit()
     conn.close()
-    logger.info(f"Re-Analyse du fichier audio effectué")
+
+    logger.info(f"Re-Analyse du fichier audio effectué: {lang}")
     return {'status': 'ok', 'language': lang}
 
 # -------------------------

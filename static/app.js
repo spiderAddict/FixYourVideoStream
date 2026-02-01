@@ -182,11 +182,7 @@ async function showDetail(file){
      document.getElementById('analyze').onclick = async ()=>{
       try {
         showLoader();
-        await api(`/api/files/analyze`, {
-          method:'POST',
-          headers:{'Content-Type':'application/json'},
-          body: JSON.stringify({path:`${file.path}`,filename: `${file.filename}`}),
-        });
+        await api(`/api/files/${file.id}/analyze`, {method:'POST'});
         await loadList();
         showDetail(file);
       } catch (e) {
