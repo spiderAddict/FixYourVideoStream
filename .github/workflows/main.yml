@@ -7,6 +7,9 @@ on:
 env:
   # Use docker.io for Docker Hub if empty
   REGISTRY: ghcr.io
+  # github.repository as <account>/<repo>
+  IMAGE_NAME: ${{ github.repository }}
+
 jobs:
 
   docker:
@@ -22,13 +25,21 @@ jobs:
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          password: ${{ secrets.GITHUB_TOKEN }}     
+      - name: Extract metadata (tags, labels) for Docker
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
       - name: Docker Build
         uses: docker/build-push-action@v6
         with:
           file: ./Dockerfile
-          tags: ${{ github.ref_name }}
+          tags: ${{ steps.meta.outputs.tags }}
           context: . 
           push: true
-          build-args: |
-            APP_VERSION=${{ github.ref_name }}
+      build-args: |
+        APP_VERSION=${{ github.ref_name }}
