@@ -203,22 +203,25 @@ def analyze_all():
     count = len(files) 
 
     for file in files:
-        file_id = file['id']
         file_path = file['path']
         file_filename = file['filename']
         lang = ffprobe_get_audio_language(file_path)
         analyzed_at = datetime.utcnow().isoformat()
-        c.execute('SELECT id FROM files WHERE path=?', (file_path,))
-        if c.fetchone():
-            c.execute(
+        
+        # Créer un nouveau cursor pour les UPDATE/INSERT
+        c2 = conn.cursor()
+        c2.execute('SELECT id FROM files WHERE path=?', (file_path,))
+        if c2.fetchone():
+            c2.execute(
                 'UPDATE files SET filename=?, language=?, analyzed_at=? WHERE path=?',
                 (file_filename, lang, analyzed_at, file_path)
             )
         else:
-            c.execute(
+            c2.execute(
                 'INSERT INTO files (path, filename, language, analyzed_at) VALUES (?,?,?,?)',
                 (file_path, file_filename, lang, analyzed_at)
             )
+        c2.close()
     conn.commit()
     conn.close()
     return {'status': 'ok', 'count': count}
@@ -240,14 +243,14 @@ def analyze_new():
         file_filename = file['filename']
         lang = ffprobe_get_audio_language(file_path)
         analyzed_at = datetime.utcnow().isoformat()
-        c.execute(
-            'INSERT INTO files (path, filename, language, analyzed_at) VALUES (?,?,?,?)',
-            (file_path, file_filename, lang, analyzed_at)
+        c2 = conn.cursor()
+        c2.execute(
+            'UPDATE files SET language=?, analyzed_at=? WHERE id=?',
+            (lang, analyzed_at, file_id)
         )
+        c2.close()
     conn.commit()
     conn.close()
-    conn = get_conn()
-    c = conn.cursor()
     return {'status': 'ok', 'count': count}
 
 # -------------------------

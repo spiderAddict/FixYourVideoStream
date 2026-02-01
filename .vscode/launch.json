@@ -13,7 +13,7 @@
         "--port", "8000"
       ],
       "env": {
-        "VIDEOS_DIR": "${workspaceFolder}/videos",
+        "VIDEOS_DIR": "${workspaceFolder}/test_videos",
         "DB_PATH": "${workspaceFolder}/app.db"
       },
       "jinja": true,
