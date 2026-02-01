@@ -268,6 +268,8 @@ def reanalyze(model: AnalyseModel):
 
 @app.post('/api/files/{file_id}/reanalyze')
 def reanalyze(file_id: int):
+    logger.info(f"Demande de re-Analyse du fichier: {file_id}")
+        
     conn = get_conn()
     c = conn.cursor()
     c.execute('SELECT path FROM files WHERE id=?', (file_id,))
@@ -277,12 +279,15 @@ def reanalyze(file_id: int):
         logger.error(f"Fichier non trouvé pour reanalyse: id={file_id}")
         raise HTTPException(status_code=404, detail='File not found')
     path = r['path']
+    logger.info(f"Re-Analyse du fichier audio avec ffprobe: {path}")
     lang = ffprobe_get_audio_language(path)
     analyzed_at = datetime.utcnow().isoformat()
+    logger.debug(f"Langue du fichier audio: {lang}")
     c.execute('UPDATE files SET language=?, analyzed_at=? WHERE id=?',
               (lang, analyzed_at, file_id))
     conn.commit()
     conn.close()
+    logger.info(f"Re-Analyse du fichier audio effectué")
     return {'status': 'ok', 'language': lang}
 
 # -------------------------
