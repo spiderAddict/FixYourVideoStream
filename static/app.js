@@ -1,16 +1,5 @@
 // static/app.js
 
-// Charge la version de l'application
-async function loadVersion() {
-  try {
-    const data = await api('/api/version');
-    document.getElementById('appVersion').textContent = data.version;
-  } catch (err) {
-    console.error('Erreur lors du chargement de la version:', err);
-    document.getElementById('appVersion').textContent = 'erreur';
-  }
-}
-
 // Fonctions pour gérer le loader
 function showLoader() {
   document.getElementById('loadingOverlay').classList.remove('is-hidden');
