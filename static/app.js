@@ -120,10 +120,7 @@ function renderList() {
 }
 
 // Mets à jour la liste quand on change un filtre
-document.addEventListener('DOMContentLoaded', () => {
-  // Charge la version
-  loadVersion();
-  
+document.addEventListener('DOMContentLoaded', () => {  
   const pageSizeSelect = document.getElementById('pageSize');
   if (pageSizeSelect) {
     pageSizeSelect.value = pageSize;
