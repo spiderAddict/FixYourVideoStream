@@ -358,7 +358,7 @@ def set_language(file_id: int, model: SetLangModel):
         if res.returncode != 0:
             logger.error(f"Process de changement de langue en erreur: cmd={cmd}: {res.stderr}")
             raise HTTPException(status_code=500, detail=f'ffmpeg error: {res.stderr[:500]}')
-        shutil.move(tmp_path, src)
+        safe_move(tmp_path, src)
         analyzed_at = datetime.utcnow().isoformat()
         c.execute(
             'UPDATE files SET language=?, analyzed_at=? WHERE id=?',
@@ -370,3 +370,13 @@ def set_language(file_id: int, model: SetLangModel):
             os.remove(tmp_path)
         conn.close()
     return {'status': 'ok', 'language': model.language}
+
+# -------------------------
+# Safe move, meme pour nas
+# -------------------------
+def safe_move(src, dst):
+    try:
+        os.rename(src, dst)
+    except OSError:
+        shutil.copyfile(src, dst)
+        os.remove(src)
