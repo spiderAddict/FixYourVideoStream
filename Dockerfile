@@ -23,7 +23,13 @@ ENV DB_PATH=/app/app.db
 
 EXPOSE 8000
 
-# Basculer vers un UID non-root
-USER 1000:1000
+# Créer l'utilisateur avec un UID par défaut
+ARG UID=1000
+ARG GID=1000
+
+RUN groupadd -g ${GID} appuser && \
+    useradd -u ${UID} -g appuser -m appuser
+
+USER appuser
 
 CMD ["uvicorn", "backend.main:app", "--host", "0.0.0.0", "--port", "8000"]
