@@ -219,16 +219,17 @@ def analyze_all():
     count = len(files) 
 
     for file in files:
+        file_id = file['id']
         file_path = file['path']
-        file_filename = file['filename']
         lang = ffprobe_get_audio_language(file_path)
         analyzed_at = datetime.utcnow().isoformat()
-        
-        # Créer un nouveau cursor pour les UPDATE/INSERT
+
+        # UPDATE par id (et non INSERT OR REPLACE) pour conserver l'id du fichier :
+        # un REPLACE supprime puis recrée la ligne, ce qui change son id
         c2 = conn.cursor()
         c2.execute(
-            'INSERT OR REPLACE INTO files (path, filename, language, analyzed_at) VALUES (?,?,?,?)',
-            (file_path, file_filename, lang, analyzed_at)
+            'UPDATE files SET language=?, analyzed_at=? WHERE id=?',
+            (lang, analyzed_at, file_id)
         )
         c2.close()
     conn.commit()
