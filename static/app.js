@@ -18,6 +18,17 @@ async function api(url, opts) {
     return r.json();
 }
 
+function escapeHtml(text){
+  const div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
+}
+
+// Signale les fichiers en erreur après une analyse en masse
+function notifyAnalysisErrors(res){
+  if (res.errors) showNotification(`${res.errors} fichier(s) en erreur d'analyse`, "error");
+}
+
 function renderTemplate(templateId, data){
   let tpl = document.getElementById(templateId).innerHTML;
   for (let key in data){
@@ -26,6 +37,13 @@ function renderTemplate(templateId, data){
   }
   return tpl;
 }
+
+// Pastille de statut d'analyse dans la liste
+const STATUS_TAGS = {
+  analyzed: `<span class="tag is-success" title="Analysé">✓</span>`,
+  not_analyzed: `<span class="tag is-warning" title="Pas encore analysé">⏳</span>`,
+  error: `<span class="tag is-danger" title="Erreur d'analyse">✗</span>`
+};
 
 let allFiles = [];
 let currentPage = 1;
@@ -75,8 +93,7 @@ function getFilteredFiles() {
     let langOk = true;
     let nameOk = true;
 
-    if (status === "analyzed") statusOk = !!f.analyzed_at;
-    if (status === "not_analyzed") statusOk = !f.analyzed_at;
+    if (status) statusOk = (f.status === status);
     if (lang) langOk = (f.language === lang);
     if (name) nameOk = f.filename.toLowerCase().includes(name);
 
@@ -93,9 +110,7 @@ function renderList() {
   const files = filteredFiles.slice(start, end);
 
   for (let f of files) {
-    const statusTag = f.analyzed_at
-      ? `<span class="tag is-success">✓</span>`
-      : `<span class="tag is-warning">⏳</span>`;
+    const statusTag = STATUS_TAGS[f.status];
 
     const langTag = f.language
       ? `<span class="tag is-info">${f.language}</span>`
@@ -148,9 +163,11 @@ async function showDetail(file){
   const pane = document.getElementById('detailPane');
   pane.classList.remove('is-hidden');
 
-  const analyzedTag = file.analyzed_at 
-    ? `<span class="tag is-success">Oui</span>` 
-    : `<span class="tag is-warning">Non</span>`;
+  const analyzedTag = {
+    analyzed: `<span class="tag is-success">Oui</span>`,
+    not_analyzed: `<span class="tag is-warning">Non</span>`,
+    error: `<span class="tag is-danger">Erreur</span> ${escapeHtml(file.analysis_error || '')}`
+  }[file.status];
 
   const languageTag = file.language 
     ? `<span class="tag is-info">${file.language}</span>` 
@@ -163,35 +180,24 @@ async function showDetail(file){
     language: languageTag
   });
   
-  // Si le fichier n'a pas été analysé, proposer de le réanalyser
-  if (file.analyzed_at){
-    document.getElementById('analyze').onclick = async ()=>{
-      try {
-        showLoader();
-        await api(`/api/files/${file.id}/reanalyze`, {method:'POST'});
-        await loadList();
-        showDetail(file);
-      } catch (e) {
-        showNotification("Erreur : " + e.message, "error");
-      } finally {
-        hideLoader();
-      }
-    };
-  }
-  else {
-     document.getElementById('analyze').onclick = async ()=>{
-      try {
-        showLoader();
-        await api(`/api/files/${file.id}/analyze`, {method:'POST'});
-        await loadList();
-        showDetail(file);
-      } catch (e) {
-        showNotification("Erreur : " + e.message, "error");
-      } finally {
-        hideLoader();
-      }
-    };
-  }
+  // Analyse si jamais faite, réanalyse sinon
+  const analyzeUrl = file.analyzed_at
+    ? `/api/files/${file.id}/reanalyze`
+    : `/api/files/${file.id}/analyze`;
+  document.getElementById('analyze').onclick = async ()=>{
+    try {
+      showLoader();
+      const res = await api(analyzeUrl, {method:'POST'});
+      if (res.error) showNotification("Analyse en échec : " + res.error, "error");
+      await loadList();
+      // Réaffiche le détail avec les données rechargées
+      showDetail(allFiles.find(f => f.id === file.id) || file);
+    } catch (e) {
+      showNotification("Erreur : " + e.message, "error");
+    } finally {
+      hideLoader();
+    }
+  };
 
   // Forcer le français sur la piste audio choisie
   document.getElementById('setFr').onclick = async ()=>{
@@ -265,7 +271,7 @@ async function loadTracks(file){
 document.getElementById('analyzeAll').onclick = async () => {
     try {
       showLoader();
-      await api('/api/analyze_all', { method: 'POST' });
+      notifyAnalysisErrors(await api('/api/analyze_all', { method: 'POST' }));
       await loadList();
     } catch (e) {
       showNotification("Erreur : " + e.message, "error");
@@ -289,7 +295,7 @@ document.getElementById('rescan').onclick = async () => {
 document.getElementById('analyzeNew').onclick = async () => {
     try {
       showLoader();
-      await api('/api/analyze_new', { method: 'POST' });
+      notifyAnalysisErrors(await api('/api/analyze_new', { method: 'POST' }));
       await loadList();
     } catch (e) {
       showNotification("Erreur : " + e.message, "error");

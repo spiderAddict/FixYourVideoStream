@@ -79,6 +79,11 @@ def init_db():
         value TEXT
     )
     ''')
+    # Migration : message d'erreur de la dernière analyse (NULL si elle a réussi)
+    columns = {row['name'] for row in c.execute('PRAGMA table_info(files)')}
+    if 'analysis_error' not in columns:
+        logger.info("Migration de la base: ajout de la colonne files.analysis_error")
+        c.execute('ALTER TABLE files ADD COLUMN analysis_error TEXT')
     conn.commit()
     conn.close()
 
@@ -120,11 +125,34 @@ def primary_language(tracks):
     return primary['language']
 
 def ffprobe_get_audio_language(path):
+    """Retourne (langue, erreur). Une erreur signifie que le fichier n'a pas pu être lu :
+    à ne pas confondre avec (None, None), fichier lu mais sans langue renseignée."""
+    logger.info(f"Analyse du fichier audio avec ffprobe: {path}")
+    if not os.path.isfile(path):
+        logger.error(f"Analyse impossible, fichier introuvable: {path}")
+        return None, "Fichier introuvable"
     try:
-        logger.info(f"Analyse du fichier audio avec ffprobe: {path}")
-        return primary_language(audio_tracks(ffprobe_streams(path)))
-    except subprocess.CalledProcessError:
-        return None
+        return primary_language(audio_tracks(ffprobe_streams(path))), None
+    except FileNotFoundError as exc:
+        # ffprobe absent : problème d'installation, pas du fichier, on n'enregistre rien
+        logger.exception("ffprobe est introuvable")
+        raise HTTPException(status_code=500, detail='ffprobe not found') from exc
+    except (subprocess.CalledProcessError, json.JSONDecodeError):
+        logger.exception(f"Analyse ffprobe en échec: {path}")
+        return None, "Fichier illisible par ffprobe"
+
+def save_analysis(conn, file_id, lang, error):
+    """Enregistre le résultat d'une analyse (réussie ou en erreur)"""
+    conn.execute(
+        'UPDATE files SET language=?, analyzed_at=?, analysis_error=? WHERE id=?',
+        (lang, datetime.utcnow().isoformat(), error, file_id)
+    )
+
+def file_status(row):
+    """Statut d'analyse : not_analyzed, analyzed ou error"""
+    if not row['analyzed_at']:
+        return 'not_analyzed'
+    return 'error' if row['analysis_error'] else 'analyzed'
 
 def scan_directory():
     """Retourne la liste des fichiers vidéo trouvés dans VIDEOS_DIR"""
@@ -171,19 +199,22 @@ def set_theme(model: ThemeModel):
 def list_files(name: str = Query(None, description="Filtre sur le nom du fichier")):
     conn = get_conn()
     c = conn.cursor()
-    c.execute('SELECT id, path, filename, language, analyzed_at FROM files')
+    c.execute('SELECT id, path, filename, language, analyzed_at, analysis_error FROM files')
     rows = c.fetchall()
     conn.close()
 
     result = []
     for r in rows:
+        status = file_status(r)
         item = {
             'id': r['id'],
             'filename': r['filename'],
             'path': r['path'],
             'language': r['language'],
             'analyzed_at': r['analyzed_at'],
-            'analyzed': bool(r['analyzed_at'])
+            'analysis_error': r['analysis_error'],
+            'status': status,
+            'analyzed': status == 'analyzed'
         }
         if name is None or name.lower() in item['filename'].lower():
             result.append(item)
@@ -194,13 +225,13 @@ def get_file(file_id: int):
 
     conn = get_conn()
     c = conn.cursor()
-    c.execute('SELECT id, filename, path, language, analyzed_at FROM files WHERE id=?', (file_id,))
+    c.execute('SELECT id, filename, path, language, analyzed_at, analysis_error FROM files WHERE id=?', (file_id,))
     r = c.fetchone()
     conn.close()
     if not r:
         logger.error(f"Fichier non trouvé pour reanalyse: id={file_id}")
         raise HTTPException(status_code=404, detail='File not found')
-    return dict(r)
+    return {**dict(r), 'status': file_status(r)}
 
 @app.post('/api/rescan')
 def analyze_new():
@@ -242,50 +273,40 @@ def analyze_all():
     files = c.fetchall()
     count = len(files) 
 
-    for file in files:
-        file_id = file['id']
-        file_path = file['path']
-        lang = ffprobe_get_audio_language(file_path)
-        analyzed_at = datetime.utcnow().isoformat()
-
-        # UPDATE par id (et non INSERT OR REPLACE) pour conserver l'id du fichier :
-        # un REPLACE supprime puis recrée la ligne, ce qui change son id
-        c2 = conn.cursor()
-        c2.execute(
-            'UPDATE files SET language=?, analyzed_at=? WHERE id=?',
-            (lang, analyzed_at, file_id)
-        )
-        c2.close()
-    conn.commit()
-    conn.close()
-    return {'status': 'ok', 'count': count}
+    errors = 0
+    try:
+        for file in files:
+            lang, error = ffprobe_get_audio_language(file['path'])
+            errors += bool(error)
+            # UPDATE par id (et non INSERT OR REPLACE) pour conserver l'id du fichier :
+            # un REPLACE supprime puis recrée la ligne, ce qui change son id
+            save_analysis(conn, file['id'], lang, error)
+        conn.commit()
+    finally:
+        conn.close()
+    return {'status': 'ok', 'count': count, 'errors': errors}
 
 @app.post('/api/analyze_new')
-def analyze_new():        
+def analyze_new():
     logger.info("Analyser tous les fichiers pas encore analysé")
-    
+
     conn = get_conn()
     c = conn.cursor()
-    # Parcours les fichiers déjà en base, mais non analysés, analyzed_at == null    
-    c.execute('SELECT id, path, filename FROM files WHERE analyzed_at IS NULL')
+    # Fichiers en base jamais analysés, ou dont la dernière analyse a échoué
+    c.execute('SELECT id, path, filename FROM files WHERE analyzed_at IS NULL OR analysis_error IS NOT NULL')
     files = c.fetchall()
     count = len(files)
 
-    for file in files:
-        file_id = file['id']
-        file_path = file['path']
-        file_filename = file['filename']
-        lang = ffprobe_get_audio_language(file_path)
-        analyzed_at = datetime.utcnow().isoformat()
-        c2 = conn.cursor()
-        c2.execute(
-            'UPDATE files SET language=?, analyzed_at=? WHERE id=?',
-            (lang, analyzed_at, file_id)
-        )
-        c2.close()
-    conn.commit()
-    conn.close()
-    return {'status': 'ok', 'count': count}
+    errors = 0
+    try:
+        for file in files:
+            lang, error = ffprobe_get_audio_language(file['path'])
+            errors += bool(error)
+            save_analysis(conn, file['id'], lang, error)
+        conn.commit()
+    finally:
+        conn.close()
+    return {'status': 'ok', 'count': count, 'errors': errors}
     
 @app.post('/api/files/{file_id}/analyze')
 def analyze_one(file_id: int):
@@ -303,22 +324,16 @@ def analyze_one(file_id: int):
     path = r['path']
 
     # Analyse le fichier avec ffprobe
-    lang = ffprobe_get_audio_language(path)
+    try:
+        lang, error = ffprobe_get_audio_language(path)
+        logger.debug(f"Langue du fichier audio: {lang}")
+        save_analysis(conn, file_id, lang, error)
+        conn.commit()
+    finally:
+        conn.close()
 
-    # Mise à jour de la base
-    analyzed_at = datetime.utcnow().isoformat()
-    logger.debug(f"Langue du fichier audio: {lang}")
-    conn = get_conn()
-    c = conn.cursor()
-    c.execute(
-            'UPDATE files SET language=?, analyzed_at=? WHERE id=?',
-            (lang, analyzed_at, file_id)
-        )
-    conn.commit()
-    conn.close()
-
-    logger.info(f"Analyse du fichier audio effectué: {lang}")
-    return {'status': 'ok', 'language': lang}
+    logger.info(f"Analyse du fichier audio effectué: {lang} (erreur: {error})")
+    return {'status': 'error' if error else 'ok', 'language': lang, 'error': error}
 
 @app.post('/api/files/{file_id}/reanalyze')
 def reanalyze(file_id: int):
@@ -337,18 +352,16 @@ def reanalyze(file_id: int):
 
     # Analyse le fichier avec ffprobe
     logger.info(f"Re-Analyse du fichier audio avec ffprobe: {path}")
-    lang = ffprobe_get_audio_language(path)
+    try:
+        lang, error = ffprobe_get_audio_language(path)
+        logger.debug(f"Langue du fichier audio: {lang}")
+        save_analysis(conn, file_id, lang, error)
+        conn.commit()
+    finally:
+        conn.close()
 
-    # Mise à jour de la base
-    analyzed_at = datetime.utcnow().isoformat()
-    logger.debug(f"Langue du fichier audio: {lang}")
-    c.execute('UPDATE files SET language=?, analyzed_at=? WHERE id=?',
-              (lang, analyzed_at, file_id))
-    conn.commit()
-    conn.close()
-
-    logger.info(f"Re-Analyse du fichier audio effectué: {lang}")
-    return {'status': 'ok', 'language': lang}
+    logger.info(f"Re-Analyse du fichier audio effectué: {lang} (erreur: {error})")
+    return {'status': 'error' if error else 'ok', 'language': lang, 'error': error}
 
 @app.get('/api/files/{file_id}/tracks')
 def get_tracks(file_id: int):
@@ -460,11 +473,7 @@ def set_language(file_id: int, model: SetLangModel):
         # La langue affichée est celle de la piste principale, qui n'est pas
         # forcément celle qui vient d'être modifiée
         lang = primary_language(output_tracks)
-        analyzed_at = datetime.utcnow().isoformat()
-        c.execute(
-            'UPDATE files SET language=?, analyzed_at=? WHERE id=?',
-            (lang, analyzed_at, file_id)
-        )
+        save_analysis(conn, file_id, lang, None)
         conn.commit()
     except HTTPException:
         raise
