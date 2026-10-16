@@ -16,7 +16,7 @@ uvicorn backend.main:app --reload
 ```docker build -t fixyourvideostream . ```
 
 ## Lancer le conteneur et monter le dossier vidéo
-```docker run -it --rm -p 8000:8000 -v ./test_videos:/videos fixyourvideostream```
+```docker run -it --rm -p 8000:8000 -v ./test_videos:/videos -v fixyourvideostream_data:/data fixyourvideostream```
 
 ## Prompt ChatGpt
 ```

@@ -19,7 +19,7 @@ ENV APP_VERSION=${APP_VERSION}
 RUN sed -i "s/__APP_VERSION__/${APP_VERSION}/g" static/index.html
 
 ENV VIDEOS_DIR=/videos
-ENV DB_PATH=/app/app.db
+ENV DB_PATH=/data/app.db
 
 EXPOSE 8000
 
@@ -28,7 +28,9 @@ ARG UID=1000
 ARG GID=1000
 
 RUN groupadd -g ${GID} appuser && \
-    useradd -u ${UID} -g appuser -m appuser
+    useradd -u ${UID} -g appuser -m appuser && \
+    mkdir -p /data && \
+    chown appuser:appuser /data
 
 USER appuser
 
