@@ -193,28 +193,73 @@ async function showDetail(file){
     };
   }
 
-  // Si le fichier a été analysé, proposer de la définir en français
-  if (file.analyzed_at)
-  {
-    document.getElementById('setFr').onclick = async ()=>{
-      try {
-        showLoader();
-        await api(`/api/files/${file.id}/set_language`, {
-          method:'POST',
-          headers:{'Content-Type':'application/json'},
-          body: JSON.stringify({language:'fra'})
-        });
-        await loadList();
-        showDetail(file);
-      } catch (e) {
-        showNotification("Erreur : " + e.message, "error");
-      } finally {
-        hideLoader();
-      }
-    };
+  // Forcer le français sur la piste audio choisie
+  document.getElementById('setFr').onclick = async ()=>{
+    const selected = document.querySelector('input[name="audioTrack"]:checked');
+    if (!selected) return;
+    try {
+      showLoader();
+      await api(`/api/files/${file.id}/set_language`, {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({language:'fra', track: parseInt(selected.value)})
+      });
+      await loadList();
+      // Réaffiche le détail avec les données rechargées (langue principale mise à jour)
+      showDetail(allFiles.find(f => f.id === file.id) || file);
+    } catch (e) {
+      showNotification("Erreur : " + e.message, "error");
+    } finally {
+      hideLoader();
+    }
+  };
+
+  await loadTracks(file);
+}
+
+// Affiche les pistes audio du fichier et active « Forcer FR » si le conteneur le permet
+async function loadTracks(file){
+  const container = document.getElementById('tracks');
+  const setFr = document.getElementById('setFr');
+  let data;
+  try {
+    data = await api(`/api/files/${file.id}/tracks`);
+  } catch (e) {
+    container.textContent = "Impossible de lire les pistes audio.";
+    return;
   }
-  else 
-    document.getElementById('setFr').disabled = true;
+  // Le panneau a pu être réaffiché pour un autre fichier entre-temps
+  if (document.getElementById('tracks') !== container) return;
+
+  container.innerHTML = '';
+  if (data.tracks.length === 0) {
+    container.textContent = "Aucune piste audio.";
+    return;
+  }
+  for (const t of data.tracks) {
+    const label = document.createElement('label');
+    label.className = 'radio is-block';
+    const radio = document.createElement('input');
+    radio.type = 'radio';
+    radio.name = 'audioTrack';
+    radio.value = t.track;
+    // Présélectionne la piste principale (celle lue par défaut)
+    radio.checked = t.default || (t.track === 0 && !data.tracks.some(x => x.default));
+    label.appendChild(radio);
+    const desc = [`#${t.track}`, t.language || '?', t.codec, t.title, t.default ? '(défaut)' : null]
+      .filter(Boolean).join(' · ');
+    label.appendChild(document.createTextNode(' ' + desc));
+    container.appendChild(label);
+  }
+
+  if (data.language_editable) {
+    setFr.disabled = false;
+  } else {
+    const warn = document.createElement('p');
+    warn.className = 'is-size-7 has-text-danger';
+    warn.textContent = "Ce format de fichier ne permet pas d'enregistrer la langue des pistes.";
+    container.appendChild(warn);
+  }
 }
 
 document.getElementById('analyzeAll').onclick = async () => {

@@ -17,6 +17,10 @@ DB_PATH = os.environ.get("DB_PATH", "app.db")
 VERSION_FILE = os.path.join(os.path.dirname(os.path.dirname(__file__)), "VERSION")
 
 VIDEO_EXTS = {'.mp4', '.mkv', '.avi', '.mov', '.webm', '.m4v'}
+# Conteneurs dans lesquels ffmpeg ne sait pas écrire la langue d'une piste audio
+LANGUAGE_UNSUPPORTED_EXTS = {'.avi'}
+# Conserver l'original en <fichier>.bak lors d'un changement de langue (double l'espace disque utilisé)
+BACKUP_ON_SET_LANGUAGE = os.environ.get("BACKUP_ON_SET_LANGUAGE", "false").lower() in ("1", "true", "yes")
 
 # --- Configuration du logger ---
 logging.basicConfig(
@@ -83,22 +87,42 @@ init_db()
 # -------------------------
 # Analyse avec ffprobe
 # -------------------------
+def ffprobe_streams(path):
+    """Retourne la liste brute des flux du fichier (sortie JSON de ffprobe)"""
+    cmd = [
+        'ffprobe', '-v', 'quiet', '-print_format', 'json', '-show_streams', str(path)
+    ]
+    res = subprocess.run(cmd, capture_output=True, text=True, check=True)
+    return json.loads(res.stdout).get('streams', [])
+
+def audio_tracks(streams):
+    """Extrait les pistes audio ; 'track' est l'index relatif utilisé par ffmpeg (a:N)"""
+    tracks = []
+    for s in streams:
+        if s.get('codec_type') != 'audio':
+            continue
+        tags = s.get('tags') or {}
+        tracks.append({
+            'track': len(tracks),
+            'stream_index': s.get('index'),
+            'codec': s.get('codec_name'),
+            'language': tags.get('language') or tags.get('LANGUAGE'),
+            'title': tags.get('title') or tags.get('TITLE'),
+            'default': bool((s.get('disposition') or {}).get('default')),
+        })
+    return tracks
+
+def primary_language(tracks):
+    """Langue de la piste lue par défaut par les lecteurs : piste 'default', sinon la première"""
+    if not tracks:
+        return None
+    primary = next((t for t in tracks if t['default']), tracks[0])
+    return primary['language']
+
 def ffprobe_get_audio_language(path):
     try:
         logger.info(f"Analyse du fichier audio avec ffprobe: {path}")
-        cmd = [
-            'ffprobe', '-v', 'quiet', '-print_format', 'json', '-show_streams', str(path)
-        ]
-        res = subprocess.run(cmd, capture_output=True, text=True, check=True)
-        j = json.loads(res.stdout)
-        streams = j.get('streams', [])
-        for s in streams:
-            if s.get('codec_type') == 'audio':
-                tags = s.get('tags') or {}
-                lang = tags.get('language') or tags.get('LANGUAGE')
-                if lang:
-                    return lang
-        return None
+        return primary_language(audio_tracks(ffprobe_streams(path)))
     except subprocess.CalledProcessError:
         return None
 
@@ -326,15 +350,38 @@ def reanalyze(file_id: int):
     logger.info(f"Re-Analyse du fichier audio effectué: {lang}")
     return {'status': 'ok', 'language': lang}
 
+@app.get('/api/files/{file_id}/tracks')
+def get_tracks(file_id: int):
+    """Liste les pistes audio du fichier, lues directement sur le disque"""
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute('SELECT path FROM files WHERE id=?', (file_id,))
+    r = c.fetchone()
+    conn.close()
+    if not r:
+        logger.error(f"Fichier non trouvé pour la liste des pistes: id={file_id}")
+        raise HTTPException(status_code=404, detail='File not found')
+    path = r['path']
+    try:
+        tracks = audio_tracks(ffprobe_streams(path))
+    except Exception as exc:
+        logger.exception(f"Lecture des pistes impossible pour {path}")
+        raise HTTPException(status_code=500, detail='Unable to read audio tracks') from exc
+    return {
+        'tracks': tracks,
+        'language_editable': Path(path).suffix.lower() not in LANGUAGE_UNSUPPORTED_EXTS,
+    }
+
 # -------------------------
 # Modèle Pydantic
 # -------------------------
 class SetLangModel(BaseModel):
     language: str
-    
+    track: int = 0  # index relatif de la piste audio (a:N)
+
 @app.post('/api/files/{file_id}/set_language')
 def set_language(file_id: int, model: SetLangModel):
-    logger.info(f"Demande de changement de langue du fichier audio ({file_id})")
+    logger.info(f"Demande de changement de langue du fichier audio ({file_id}, piste a:{model.track})")
 
     conn = get_conn()
     c = conn.cursor()
@@ -346,8 +393,21 @@ def set_language(file_id: int, model: SetLangModel):
         raise HTTPException(status_code=404, detail='File not found')
     src = r['path']
 
+    # Le muxer AVI de ffmpeg n'écrit pas la langue des pistes : l'opération
+    # « réussirait » sans rien changer au fichier
+    if Path(src).suffix.lower() in LANGUAGE_UNSUPPORTED_EXTS:
+        conn.close()
+        logger.warning(f"Changement de langue refusé, conteneur non supporté: {src}")
+        raise HTTPException(status_code=400, detail=f'Container {Path(src).suffix} cannot store audio language')
+
     tmp_path = None
     try:
+        source_streams = ffprobe_streams(src)
+        source_tracks = audio_tracks(source_streams)
+        if not 0 <= model.track < len(source_tracks):
+            logger.error(f"Piste audio a:{model.track} inexistante dans {src} ({len(source_tracks)} piste(s))")
+            raise HTTPException(status_code=400, detail=f'Audio track {model.track} does not exist')
+
         tmp_fd, tmp_path = tempfile.mkstemp(
             dir=Path(src).parent,
             suffix=Path(src).suffix
@@ -357,12 +417,12 @@ def set_language(file_id: int, model: SetLangModel):
         source_size = os.path.getsize(src)
         logger.info(
             f"Changer la langue audio: {src} ({source_size} octets) "
-            f"-> {model.language}; fichier temporaire: {tmp_path}"
+            f"piste a:{model.track} -> {model.language}; fichier temporaire: {tmp_path}"
         )
         cmd = [
             'ffmpeg', '-y', '-hide_banner', '-loglevel', 'error', '-i', src,
             '-map', '0', '-c', 'copy',
-            f'-metadata:s:a:0', f'language={model.language}', tmp_path
+            f'-metadata:s:a:{model.track}', f'language={model.language}', tmp_path
         ]
         res = subprocess.run(cmd, capture_output=True, text=True)
         if res.returncode != 0:
@@ -374,25 +434,36 @@ def set_language(file_id: int, model: SetLangModel):
             logger.error(f"Sortie ffmpeg vide pour {src}: {tmp_path}")
             raise HTTPException(status_code=500, detail='ffmpeg produced an empty file')
 
-        probe_cmd = [
-            'ffprobe', '-v', 'error', '-show_entries', 'stream=index',
-            '-of', 'json', tmp_path
-        ]
-        probe_res = subprocess.run(probe_cmd, capture_output=True, text=True)
-        if probe_res.returncode != 0:
-            logger.error(f"Validation ffprobe échouée pour {tmp_path}: {probe_res.stderr}")
+        # Validation de la sortie avant de toucher à l'original : même nombre de flux
+        # (aucun flux perdu par le remux) et langue effectivement écrite sur la piste
+        try:
+            output_streams = ffprobe_streams(tmp_path)
+        except subprocess.CalledProcessError as exc:
+            logger.error(f"Validation ffprobe échouée pour {tmp_path}: {exc.stderr}")
             raise HTTPException(status_code=500, detail='ffprobe validation failed')
-        if not json.loads(probe_res.stdout).get('streams'):
-            logger.error(f"Aucun flux détecté dans la sortie ffmpeg: {tmp_path}")
-            raise HTTPException(status_code=500, detail='ffmpeg produced a file without streams')
+        if len(output_streams) != len(source_streams):
+            logger.error(
+                f"Flux perdus par ffmpeg pour {src}: {len(source_streams)} -> {len(output_streams)}"
+            )
+            raise HTTPException(status_code=500, detail='ffmpeg output is missing streams')
+        output_tracks = audio_tracks(output_streams)
+        if output_tracks[model.track]['language'] != model.language:
+            logger.error(f"Langue non écrite dans la sortie ffmpeg pour {src}: {output_tracks[model.track]}")
+            raise HTTPException(status_code=500, detail='Language was not written to the output file')
 
         os.chmod(tmp_path, source_mode)
-        safe_move(tmp_path, src)
-        logger.info(f"Remplacement atomique réussi: {src} ({source_size} -> {output_size} octets)")
+        backup_path = safe_move(tmp_path, src)
+        logger.info(f"Remplacement réussi: {src} ({source_size} -> {output_size} octets)")
+        if backup_path:
+            logger.info(f"Original conservé: {backup_path}")
+
+        # La langue affichée est celle de la piste principale, qui n'est pas
+        # forcément celle qui vient d'être modifiée
+        lang = primary_language(output_tracks)
         analyzed_at = datetime.utcnow().isoformat()
         c.execute(
             'UPDATE files SET language=?, analyzed_at=? WHERE id=?',
-            (model.language, analyzed_at, file_id)
+            (lang, analyzed_at, file_id)
         )
         conn.commit()
     except HTTPException:
@@ -404,10 +475,27 @@ def set_language(file_id: int, model: SetLangModel):
         if tmp_path and os.path.exists(tmp_path):
             os.remove(tmp_path)
         conn.close()
-    return {'status': 'ok', 'language': model.language}
+    return {'status': 'ok', 'language': lang, 'tracks': output_tracks}
 
 # -------------------------
 # Safe move, meme pour nas
 # -------------------------
 def safe_move(src, dst):
-    os.replace(src, dst)
+    """Remplace dst par src. Si BACKUP_ON_SET_LANGUAGE est actif, l'original est
+    conservé en <dst>.bak (ignoré par le scan) ; retourne alors son chemin."""
+    if not BACKUP_ON_SET_LANGUAGE:
+        os.replace(src, dst)
+        return None
+    backup_path = f"{dst}.bak"
+    if os.path.exists(backup_path):
+        # Un .bak existe déjà : c'est l'original d'avant toute modification, on le garde
+        os.replace(src, dst)
+        return backup_path
+    os.replace(dst, backup_path)
+    try:
+        os.replace(src, dst)
+    except Exception:
+        # Remet l'original en place si le remplacement échoue
+        os.replace(backup_path, dst)
+        raise
+    return backup_path
