@@ -45,6 +45,35 @@ const STATUS_TAGS = {
   error: `<span class="tag is-danger" title="Erreur d'analyse">✗</span>`
 };
 
+// Valeur du filtre de langue pour les fichiers sans langue renseignée
+const NO_LANGUAGE = '__none__';
+const languageNames = new Intl.DisplayNames(['fr'], {type: 'language'});
+
+// Libellé lisible d'un code langue ISO 639 (« fra » -> « français (fra) »)
+function languageLabel(code){
+  if (code === 'und') return `indéterminée (${code})`;
+  let name = code;
+  try { name = languageNames.of(code); } catch (e) { /* code non reconnu */ }
+  return name === code ? code : `${name} (${code})`;
+}
+
+// Construit le filtre de langue à partir des codes réellement présents
+// (ffprobe renvoie des codes ISO 639-2 comme « fra », « eng »)
+function refreshLanguageFilter(){
+  const select = document.getElementById('filterLang');
+  const current = select.value;
+  const codes = [...new Set(allFiles.map(f => f.language).filter(Boolean))]
+    .sort((a, b) => languageLabel(a).localeCompare(languageLabel(b), 'fr'));
+
+  select.innerHTML = '';
+  select.add(new Option('Toutes les langues', ''));
+  for (const code of codes) select.add(new Option(languageLabel(code), code));
+  if (allFiles.some(f => !f.language)) select.add(new Option('Inconnue', NO_LANGUAGE));
+
+  // Conserve la sélection si la langue existe toujours
+  select.value = [...select.options].some(o => o.value === current) ? current : '';
+}
+
 let allFiles = [];
 let currentPage = 1;
 let pageSize = 10;
@@ -94,7 +123,8 @@ function getFilteredFiles() {
     let nameOk = true;
 
     if (status) statusOk = (f.status === status);
-    if (lang) langOk = (f.language === lang);
+    if (lang === NO_LANGUAGE) langOk = !f.language;
+    else if (lang) langOk = (f.language === lang);
     if (name) nameOk = f.filename.toLowerCase().includes(name);
 
     return statusOk && langOk && nameOk;
@@ -313,6 +343,7 @@ async function loadTheme(){
 async function loadList() {
   try {
     allFiles = await api('/api/files');
+    refreshLanguageFilter();
     currentPage = 1;
     renderList();
   } catch (e) {
