@@ -3,8 +3,8 @@ import sqlite3
 import subprocess
 import json
 import tempfile
-import shutil
 import logging
+import stat
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -345,12 +345,21 @@ def set_language(file_id: int, model: SetLangModel):
         raise HTTPException(status_code=404, detail='File not found')
     src = r['path']
 
-    tmp_fd, tmp_path = tempfile.mkstemp(suffix=Path(src).suffix)
-    os.close(tmp_fd)
+    tmp_path = None
     try:
-        logger.info(f"Changer la langue audio du fichier avec ffmpeg: {src} -> {model.language}")
+        tmp_fd, tmp_path = tempfile.mkstemp(
+            dir=Path(src).parent,
+            suffix=Path(src).suffix
+        )
+        os.close(tmp_fd)
+        source_mode = stat.S_IMODE(os.stat(src).st_mode)
+        source_size = os.path.getsize(src)
+        logger.info(
+            f"Changer la langue audio: {src} ({source_size} octets) "
+            f"-> {model.language}; fichier temporaire: {tmp_path}"
+        )
         cmd = [
-            'ffmpeg', '-hide_banner', '-loglevel', 'error', '-i', src,
+            'ffmpeg', '-y', '-hide_banner', '-loglevel', 'error', '-i', src,
             '-map', '0', '-c', 'copy',
             f'-metadata:s:a:0', f'language={model.language}', tmp_path
         ]
@@ -358,15 +367,40 @@ def set_language(file_id: int, model: SetLangModel):
         if res.returncode != 0:
             logger.error(f"Process de changement de langue en erreur: cmd={cmd}: {res.stderr}")
             raise HTTPException(status_code=500, detail=f'ffmpeg error: {res.stderr[:500]}')
+
+        output_size = os.path.getsize(tmp_path)
+        if output_size == 0:
+            logger.error(f"Sortie ffmpeg vide pour {src}: {tmp_path}")
+            raise HTTPException(status_code=500, detail='ffmpeg produced an empty file')
+
+        probe_cmd = [
+            'ffprobe', '-v', 'error', '-show_entries', 'stream=index',
+            '-of', 'json', tmp_path
+        ]
+        probe_res = subprocess.run(probe_cmd, capture_output=True, text=True)
+        if probe_res.returncode != 0:
+            logger.error(f"Validation ffprobe échouée pour {tmp_path}: {probe_res.stderr}")
+            raise HTTPException(status_code=500, detail='ffprobe validation failed')
+        if not json.loads(probe_res.stdout).get('streams'):
+            logger.error(f"Aucun flux détecté dans la sortie ffmpeg: {tmp_path}")
+            raise HTTPException(status_code=500, detail='ffmpeg produced a file without streams')
+
+        os.chmod(tmp_path, source_mode)
         safe_move(tmp_path, src)
+        logger.info(f"Remplacement atomique réussi: {src} ({source_size} -> {output_size} octets)")
         analyzed_at = datetime.utcnow().isoformat()
         c.execute(
             'UPDATE files SET language=?, analyzed_at=? WHERE id=?',
             (model.language, analyzed_at, file_id)
         )
         conn.commit()
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception(f"Échec du changement de langue pour {src}")
+        raise HTTPException(status_code=500, detail='Unable to update file language') from exc
     finally:
-        if os.path.exists(tmp_path):
+        if tmp_path and os.path.exists(tmp_path):
             os.remove(tmp_path)
         conn.close()
     return {'status': 'ok', 'language': model.language}
@@ -375,8 +409,4 @@ def set_language(file_id: int, model: SetLangModel):
 # Safe move, meme pour nas
 # -------------------------
 def safe_move(src, dst):
-    try:
-        os.rename(src, dst)
-    except OSError:
-        shutil.copyfile(src, dst)
-        os.remove(src)
+    os.replace(src, dst)
