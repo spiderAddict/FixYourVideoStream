@@ -47,6 +47,15 @@ def test_old_database_is_migrated(app):
     assert (old['language'], old['status'], old['analysis_error']) == ('eng', 'analyzed', None)
 
 
+def test_version_comes_from_environment(app, monkeypatch):
+    assert app.client.get('/api/version').json() == {'version': 'unknown'}
+
+    monkeypatch.setenv('APP_VERSION', 'v1.2.3')
+    importlib.reload(sys.modules['backend.main'])
+
+    assert app.client.get('/api/version').json() == {'version': 'v1.2.3'}
+
+
 def test_theme_is_saved(app):
     assert app.client.get('/api/theme').json() == {'theme': 'plex'}
     assert app.client.post('/api/theme', json={'theme': 'jellyfin'}).status_code == 200

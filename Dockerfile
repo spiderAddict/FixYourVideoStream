@@ -11,12 +11,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY backend ./backend
 COPY static ./static
 
-# 👇 Version de l'app
+# Version de l'app, servie par /api/version et affichée dans l'en-tête
 ARG APP_VERSION
 ENV APP_VERSION=${APP_VERSION}
-
-# Remplacement dans le HTML
-RUN sed -i "s/__APP_VERSION__/${APP_VERSION}/g" static/index.html
 
 ENV VIDEOS_DIR=/videos
 ENV DB_PATH=/data/app.db

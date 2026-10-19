@@ -21,7 +21,7 @@
         <div class="level-right">
           <div class="is-flex is-align-items-center">
             <p class="heading mr-2">Version</p>
-            <p class="heading has-text-white has-background-dark" id="appVersion">__APP_VERSION__</p>
+            <p class="heading has-text-white has-background-dark" id="appVersion"></p>
           </div>
           <div class="select ml-4">
             <select id="themeSelector">
@@ -110,18 +110,6 @@
       </div>
 
       <!-- Templates -->
-      <script type="text/template" id="list-item-template">
-      <a class="file-item" data-id="{{id}}">
-        <span class="icon-text">
-          <span>{{filename}}</span>
-          <span class="tags ml-2">
-            {{status}}
-            {{language}}
-          </span>
-        </span>
-      </a>
-    </script>
-
       <script type="text/template" id="detail-template">
       <!-- Les emplacements data-field sont remplis en texte par app.js (jamais en HTML) -->
       <h3 class="title is-5" data-field="filename"></h3>

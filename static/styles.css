@@ -7,37 +7,6 @@ body {
     max-width: 900px
 }
 
-.file-list {
-    list-style: none;
-    padding: 0
-}
-
-.file-item {
-    display: flex;
-    gap: 12px;
-    padding: 8px;
-    border-bottom: 1px solid #ddd;
-    cursor: pointer
-}
-
-.status {
-    width: 20px
-}
-
-.pane {
-    border: 1px solid #ccc;
-    padding: 12px;
-    margin-top: 12px
-}
-
-.hidden {
-    display: none
-}
-
-.controls {
-    margin-bottom: 12px
-}
-
 .detail-pane {
   position: sticky;
   top: 1rem;      /* distance par rapport au haut de la fenêtre */
@@ -48,9 +17,11 @@ body {
 /* Base */
 .file-item {
   display: flex;
+  gap: 12px;
   justify-content: space-between;
   align-items: center;
   padding: 0.5rem;
+  border-bottom: 1px solid #ddd;
   border-radius: 4px;
   cursor: pointer;
 }

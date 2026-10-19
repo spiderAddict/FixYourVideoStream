@@ -358,6 +358,11 @@ document.getElementById('rescan').onclick = async () => {
 
 document.getElementById('analyzeNew').onclick = () => startBulkAnalysis('/api/analyze_new');
 
+async function loadVersion(){
+  const res = await api('/api/version');
+  document.getElementById('appVersion').textContent = res.version;
+}
+
 async function loadTheme(){
   const res = await api('/api/theme');
   document.body.dataset.theme = res.theme;
@@ -402,6 +407,7 @@ document.getElementById('themeSelector').onchange = async (e)=>{
 document.addEventListener('DOMContentLoaded', () => {
   loadList().catch(e => console.error(e));
   loadTheme().catch(e => console.error(e));
+  loadVersion().catch(e => console.error(e));
   // Reprend le suivi d'une analyse en masse lancée avant le rechargement de la page
   api('/api/jobs/current')
     .then(job => { if (job.running) followJob(); })
