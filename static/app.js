@@ -189,7 +189,11 @@ document.addEventListener('DOMContentLoaded', () => {
   };
 });
 
+// Id du fichier affiché dans le panneau de détail
+let currentDetailId = null;
+
 async function showDetail(file){
+  currentDetailId = file.id;
   const pane = document.getElementById('detailPane');
   pane.classList.remove('is-hidden');
 
@@ -298,23 +302,62 @@ async function loadTracks(file){
   }
 }
 
-document.getElementById('analyzeAll').onclick = async () => {
-    try {
-      showLoader();
-      notifyAnalysisErrors(await api('/api/analyze_all', { method: 'POST' }));
-      await loadList();
-    } catch (e) {
-      showNotification("Erreur : " + e.message, "error");
-    } finally {
-      hideLoader();
+const DEFAULT_LOADER_TEXT = "Chargement en cours...";
+
+function setLoaderText(text) {
+  document.querySelector('#loadingOverlay .loading-text').textContent = text;
+}
+
+// Suit l'analyse en masse côté serveur jusqu'à sa fin, avec l'avancement dans le loader
+async function followJob() {
+  try {
+    showLoader();
+    let job = await api('/api/jobs/current');
+    while (job.running) {
+      setLoaderText(`Analyse en cours : ${job.done} / ${job.total}`);
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      job = await api('/api/jobs/current');
     }
-};
+    if (job.error) showNotification(`Analyse interrompue après ${job.done} / ${job.total} fichier(s) : ${job.error}`, "error");
+    else notifyAnalysisErrors(job);
+    await loadList();
+  } catch (e) {
+    showNotification("Erreur : " + e.message, "error");
+  } finally {
+    setLoaderText(DEFAULT_LOADER_TEXT);
+    hideLoader();
+  }
+}
+
+// Démarre une analyse en masse (tâche de fond) puis suit son avancement
+async function startBulkAnalysis(url) {
+  try {
+    // Une analyse lancée ailleurs (autre onglet) est suivie au lieu d'être refusée
+    const current = await api('/api/jobs/current');
+    if (!current.running) await api(url, { method: 'POST' });
+  } catch (e) {
+    showNotification("Erreur : " + e.message, "error");
+    return;
+  }
+  await followJob();
+}
+
+document.getElementById('analyzeAll').onclick = () => startBulkAnalysis('/api/analyze_all');
 
 document.getElementById('rescan').onclick = async () => {
     try {
       showLoader();
-      await api('/api/rescan', { method: 'POST' });
+      const res = await api('/api/rescan', { method: 'POST' });
+      showNotification(`${res.count} fichier(s) ajouté(s), ${res.removed} retiré(s)`, "success");
+      if (res.purge_skipped) {
+        showNotification("Répertoire vidéo absent ou vide (volume non monté ?) : fichiers disparus conservés", "error");
+      }
       await loadList();
+      // Ferme le détail si le fichier affiché a été retiré
+      if (currentDetailId !== null && !allFiles.some(f => f.id === currentDetailId)) {
+        document.getElementById('detailPane').classList.add('is-hidden');
+        currentDetailId = null;
+      }
     } catch (e) {
       showNotification("Erreur : " + e.message, "error");
     } finally {
@@ -322,17 +365,7 @@ document.getElementById('rescan').onclick = async () => {
     }
 };
 
-document.getElementById('analyzeNew').onclick = async () => {
-    try {
-      showLoader();
-      notifyAnalysisErrors(await api('/api/analyze_new', { method: 'POST' }));
-      await loadList();
-    } catch (e) {
-      showNotification("Erreur : " + e.message, "error");
-    } finally {
-      hideLoader();
-    }
-};
+document.getElementById('analyzeNew').onclick = () => startBulkAnalysis('/api/analyze_new');
 
 async function loadTheme(){
   const res = await api('/api/theme');
@@ -365,6 +398,10 @@ document.getElementById('themeSelector').onchange = async (e)=>{
 document.addEventListener('DOMContentLoaded', () => {
   loadList().catch(e => console.error(e));
   loadTheme().catch(e => console.error(e));
+  // Reprend le suivi d'une analyse en masse lancée avant le rechargement de la page
+  api('/api/jobs/current')
+    .then(job => { if (job.running) followJob(); })
+    .catch(e => console.error(e));
 });
 
 /**
