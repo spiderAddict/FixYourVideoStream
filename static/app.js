@@ -302,17 +302,47 @@ async function loadTracks(file){
   }
 }
 
-document.getElementById('analyzeAll').onclick = async () => {
-    try {
-      showLoader();
-      notifyAnalysisErrors(await api('/api/analyze_all', { method: 'POST' }));
-      await loadList();
-    } catch (e) {
-      showNotification("Erreur : " + e.message, "error");
-    } finally {
-      hideLoader();
+const DEFAULT_LOADER_TEXT = "Chargement en cours...";
+
+function setLoaderText(text) {
+  document.querySelector('#loadingOverlay .loading-text').textContent = text;
+}
+
+// Suit l'analyse en masse côté serveur jusqu'à sa fin, avec l'avancement dans le loader
+async function followJob() {
+  try {
+    showLoader();
+    let job = await api('/api/jobs/current');
+    while (job.running) {
+      setLoaderText(`Analyse en cours : ${job.done} / ${job.total}`);
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      job = await api('/api/jobs/current');
     }
-};
+    if (job.error) showNotification(`Analyse interrompue après ${job.done} / ${job.total} fichier(s) : ${job.error}`, "error");
+    else notifyAnalysisErrors(job);
+    await loadList();
+  } catch (e) {
+    showNotification("Erreur : " + e.message, "error");
+  } finally {
+    setLoaderText(DEFAULT_LOADER_TEXT);
+    hideLoader();
+  }
+}
+
+// Démarre une analyse en masse (tâche de fond) puis suit son avancement
+async function startBulkAnalysis(url) {
+  try {
+    // Une analyse lancée ailleurs (autre onglet) est suivie au lieu d'être refusée
+    const current = await api('/api/jobs/current');
+    if (!current.running) await api(url, { method: 'POST' });
+  } catch (e) {
+    showNotification("Erreur : " + e.message, "error");
+    return;
+  }
+  await followJob();
+}
+
+document.getElementById('analyzeAll').onclick = () => startBulkAnalysis('/api/analyze_all');
 
 document.getElementById('rescan').onclick = async () => {
     try {
@@ -335,17 +365,7 @@ document.getElementById('rescan').onclick = async () => {
     }
 };
 
-document.getElementById('analyzeNew').onclick = async () => {
-    try {
-      showLoader();
-      notifyAnalysisErrors(await api('/api/analyze_new', { method: 'POST' }));
-      await loadList();
-    } catch (e) {
-      showNotification("Erreur : " + e.message, "error");
-    } finally {
-      hideLoader();
-    }
-};
+document.getElementById('analyzeNew').onclick = () => startBulkAnalysis('/api/analyze_new');
 
 async function loadTheme(){
   const res = await api('/api/theme');
@@ -378,6 +398,10 @@ document.getElementById('themeSelector').onchange = async (e)=>{
 document.addEventListener('DOMContentLoaded', () => {
   loadList().catch(e => console.error(e));
   loadTheme().catch(e => console.error(e));
+  // Reprend le suivi d'une analyse en masse lancée avant le rechargement de la page
+  api('/api/jobs/current')
+    .then(job => { if (job.running) followJob(); })
+    .catch(e => console.error(e));
 });
 
 /**

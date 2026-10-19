@@ -22,6 +22,11 @@ uvicorn backend.main:app --reload
 - « Scan pour nouveaux » ajoute les nouveaux fichiers et retire de la base ceux qui n'existent plus sur le disque.
 - Si le répertoire vidéo est absent ou entièrement vide (volume non monté), aucun fichier n'est retiré.
 
+## Analyses en masse
+- « Analyser tout » et « Analyser nouveaux » tournent en tâche de fond : la progression est affichée
+  et le suivi reprend si la page est rechargée. Une seule analyse en masse à la fois.
+- L'avancement est gardé en mémoire : lancer uvicorn avec un seul process (pas de `--workers`).
+
 ## Changement de langue audio
 - La langue est modifiée sur la piste audio choisie dans le panneau de détail (pas forcément la première).
 - Les fichiers `.avi` ne peuvent pas stocker la langue des pistes : l'action y est refusée.

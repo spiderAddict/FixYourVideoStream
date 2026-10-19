@@ -5,6 +5,7 @@ import json
 import tempfile
 import logging
 import stat
+import threading
 from contextlib import contextmanager
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse
@@ -284,39 +285,76 @@ def rescan():
     return {'status': 'ok', 'count': len(added), 'removed': len(missing), 'purge_skipped': purge_skipped}
 
 
-def analyze_files(files):
-    """Analyse chaque fichier et enregistre le résultat ; retourne le nombre d'erreurs"""
-    errors = 0
-    with db() as conn:
+# -------------------------
+# Analyses en masse en tâche de fond
+# -------------------------
+# Une seule analyse en masse à la fois, exécutée dans un thread pour ne pas bloquer
+# la requête HTTP (timeout navigateur sur une grosse vidéothèque). L'état est en
+# mémoire : il suppose un seul process uvicorn (pas de --workers).
+job_lock = threading.Lock()
+job = {'running': False, 'kind': None, 'total': 0, 'done': 0, 'errors': 0,
+       'error': None, 'started_at': None, 'finished_at': None}
+
+def job_snapshot():
+    with job_lock:
+        return dict(job)
+
+def run_analysis_job(files):
+    """Analyse chaque fichier et enregistre le résultat au fil de l'eau"""
+    try:
         for file in files:
             lang, error = ffprobe_get_audio_language(file['path'])
-            errors += bool(error)
-            # UPDATE par id (et non INSERT OR REPLACE) pour conserver l'id du fichier :
-            # un REPLACE supprime puis recrée la ligne, ce qui change son id
-            save_analysis(conn, file['id'], lang, error)
-    return errors
+            # Un commit par fichier : l'avancement est conservé si le process s'arrête,
+            # et la base n'est verrouillée que le temps d'une écriture
+            with db() as conn:
+                # UPDATE par id (et non INSERT OR REPLACE) pour conserver l'id du fichier :
+                # un REPLACE supprime puis recrée la ligne, ce qui change son id
+                save_analysis(conn, file['id'], lang, error)
+            with job_lock:
+                job['done'] += 1
+                job['errors'] += bool(error)
+    except Exception as exc:
+        # HTTPException (ffprobe absent) ou erreur inattendue : l'analyse s'arrête
+        logger.exception("Analyse en masse interrompue")
+        with job_lock:
+            job['error'] = getattr(exc, 'detail', None) or str(exc)
+    finally:
+        with job_lock:
+            job['running'] = False
+            job['finished_at'] = datetime.utcnow().isoformat()
+            logger.info(f"Analyse en masse terminée: {job['done']}/{job['total']}, {job['errors']} erreur(s)")
 
-@app.post('/api/analyze_all')
+def start_analysis_job(kind, query):
+    """Démarre l'analyse des fichiers renvoyés par `query` ; 409 si une analyse tourne déjà"""
+    with job_lock:
+        if job['running']:
+            raise HTTPException(status_code=409, detail='An analysis is already running')
+        with db() as conn:
+            files = conn.execute(query).fetchall()
+        job.update(running=True, kind=kind, total=len(files), done=0, errors=0,
+                   error=None, started_at=datetime.utcnow().isoformat(), finished_at=None)
+        snapshot = dict(job)
+    threading.Thread(target=run_analysis_job, args=(files,), daemon=True).start()
+    return snapshot
+
+@app.get('/api/jobs/current')
+def get_current_job():
+    """Avancement de l'analyse en masse en cours, ou de la dernière terminée"""
+    return job_snapshot()
+
+@app.post('/api/analyze_all', status_code=202)
 def analyze_all():
     logger.info("Analyser tous les fichiers")
-
     # Parcours les fichiers déjà en base
-    with db() as conn:
-        files = conn.execute('SELECT id, path, filename FROM files').fetchall()
-    errors = analyze_files(files)
-    return {'status': 'ok', 'count': len(files), 'errors': errors}
+    return start_analysis_job('all', 'SELECT id, path FROM files')
 
-@app.post('/api/analyze_new')
+@app.post('/api/analyze_new', status_code=202)
 def analyze_new():
     logger.info("Analyser tous les fichiers pas encore analysé")
-
     # Fichiers en base jamais analysés, ou dont la dernière analyse a échoué
-    with db() as conn:
-        files = conn.execute(
-            'SELECT id, path, filename FROM files WHERE analyzed_at IS NULL OR analysis_error IS NOT NULL'
-        ).fetchall()
-    errors = analyze_files(files)
-    return {'status': 'ok', 'count': len(files), 'errors': errors}
+    return start_analysis_job(
+        'new', 'SELECT id, path FROM files WHERE analyzed_at IS NULL OR analysis_error IS NOT NULL'
+    )
 
 def analyze_one_file(file_id):
     """Analyse un fichier par son id et enregistre le résultat"""
