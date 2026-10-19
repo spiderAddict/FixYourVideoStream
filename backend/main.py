@@ -41,7 +41,7 @@ def get_version():
         if os.path.exists(VERSION_FILE):
             with open(VERSION_FILE, 'r') as f:
                 return f.read().strip()
-    except:
+    except OSError:
         pass
     return "unknown"
 
@@ -83,7 +83,7 @@ def get_file_path(file_id):
     return r['path'] if r else None
 
 def init_db():
-    logger.info(f"Initialisation de la base")
+    logger.info("Initialisation de la base")
 
     with db() as conn:
         init_schema(conn)
@@ -483,7 +483,9 @@ def set_language(file_id: int, model: SetLangModel):
             )
             raise HTTPException(status_code=500, detail='ffmpeg output is missing streams')
         output_tracks = audio_tracks(output_streams)
-        if output_tracks[model.track]['language'] != model.language:
+        # « und » (indéterminée) est la valeur par défaut des conteneurs : ffmpeg
+        # n'écrit alors aucune balise et ffprobe ne renvoie pas de langue
+        if (output_tracks[model.track]['language'] or 'und') != model.language:
             logger.error(f"Langue non écrite dans la sortie ffmpeg pour {src}: {output_tracks[model.track]}")
             raise HTTPException(status_code=500, detail='Language was not written to the output file')
 
