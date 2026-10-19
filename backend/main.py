@@ -17,6 +17,10 @@ DB_PATH = os.environ.get("DB_PATH", "app.db")
 VERSION_FILE = os.path.join(os.path.dirname(os.path.dirname(__file__)), "VERSION")
 
 VIDEO_EXTS = {'.mp4', '.mkv', '.avi', '.mov', '.webm', '.m4v'}
+# Conteneurs dans lesquels ffmpeg ne sait pas écrire la langue d'une piste audio
+LANGUAGE_UNSUPPORTED_EXTS = {'.avi'}
+# Conserver l'original en <fichier>.bak lors d'un changement de langue (double l'espace disque utilisé)
+BACKUP_ON_SET_LANGUAGE = os.environ.get("BACKUP_ON_SET_LANGUAGE", "false").lower() in ("1", "true", "yes")
 
 # --- Configuration du logger ---
 logging.basicConfig(
@@ -75,6 +79,11 @@ def init_db():
         value TEXT
     )
     ''')
+    # Migration : message d'erreur de la dernière analyse (NULL si elle a réussi)
+    columns = {row['name'] for row in c.execute('PRAGMA table_info(files)')}
+    if 'analysis_error' not in columns:
+        logger.info("Migration de la base: ajout de la colonne files.analysis_error")
+        c.execute('ALTER TABLE files ADD COLUMN analysis_error TEXT')
     conn.commit()
     conn.close()
 
@@ -83,24 +92,67 @@ init_db()
 # -------------------------
 # Analyse avec ffprobe
 # -------------------------
+def ffprobe_streams(path):
+    """Retourne la liste brute des flux du fichier (sortie JSON de ffprobe)"""
+    cmd = [
+        'ffprobe', '-v', 'quiet', '-print_format', 'json', '-show_streams', str(path)
+    ]
+    res = subprocess.run(cmd, capture_output=True, text=True, check=True)
+    return json.loads(res.stdout).get('streams', [])
+
+def audio_tracks(streams):
+    """Extrait les pistes audio ; 'track' est l'index relatif utilisé par ffmpeg (a:N)"""
+    tracks = []
+    for s in streams:
+        if s.get('codec_type') != 'audio':
+            continue
+        tags = s.get('tags') or {}
+        tracks.append({
+            'track': len(tracks),
+            'stream_index': s.get('index'),
+            'codec': s.get('codec_name'),
+            'language': tags.get('language') or tags.get('LANGUAGE'),
+            'title': tags.get('title') or tags.get('TITLE'),
+            'default': bool((s.get('disposition') or {}).get('default')),
+        })
+    return tracks
+
+def primary_language(tracks):
+    """Langue de la piste lue par défaut par les lecteurs : piste 'default', sinon la première"""
+    if not tracks:
+        return None
+    primary = next((t for t in tracks if t['default']), tracks[0])
+    return primary['language']
+
 def ffprobe_get_audio_language(path):
+    """Retourne (langue, erreur). Une erreur signifie que le fichier n'a pas pu être lu :
+    à ne pas confondre avec (None, None), fichier lu mais sans langue renseignée."""
+    logger.info(f"Analyse du fichier audio avec ffprobe: {path}")
+    if not os.path.isfile(path):
+        logger.error(f"Analyse impossible, fichier introuvable: {path}")
+        return None, "Fichier introuvable"
     try:
-        logger.info(f"Analyse du fichier audio avec ffprobe: {path}")
-        cmd = [
-            'ffprobe', '-v', 'quiet', '-print_format', 'json', '-show_streams', str(path)
-        ]
-        res = subprocess.run(cmd, capture_output=True, text=True, check=True)
-        j = json.loads(res.stdout)
-        streams = j.get('streams', [])
-        for s in streams:
-            if s.get('codec_type') == 'audio':
-                tags = s.get('tags') or {}
-                lang = tags.get('language') or tags.get('LANGUAGE')
-                if lang:
-                    return lang
-        return None
-    except subprocess.CalledProcessError:
-        return None
+        return primary_language(audio_tracks(ffprobe_streams(path))), None
+    except FileNotFoundError as exc:
+        # ffprobe absent : problème d'installation, pas du fichier, on n'enregistre rien
+        logger.exception("ffprobe est introuvable")
+        raise HTTPException(status_code=500, detail='ffprobe not found') from exc
+    except (subprocess.CalledProcessError, json.JSONDecodeError):
+        logger.exception(f"Analyse ffprobe en échec: {path}")
+        return None, "Fichier illisible par ffprobe"
+
+def save_analysis(conn, file_id, lang, error):
+    """Enregistre le résultat d'une analyse (réussie ou en erreur)"""
+    conn.execute(
+        'UPDATE files SET language=?, analyzed_at=?, analysis_error=? WHERE id=?',
+        (lang, datetime.utcnow().isoformat(), error, file_id)
+    )
+
+def file_status(row):
+    """Statut d'analyse : not_analyzed, analyzed ou error"""
+    if not row['analyzed_at']:
+        return 'not_analyzed'
+    return 'error' if row['analysis_error'] else 'analyzed'
 
 def scan_directory():
     """Retourne la liste des fichiers vidéo trouvés dans VIDEOS_DIR"""
@@ -147,19 +199,22 @@ def set_theme(model: ThemeModel):
 def list_files(name: str = Query(None, description="Filtre sur le nom du fichier")):
     conn = get_conn()
     c = conn.cursor()
-    c.execute('SELECT id, path, filename, language, analyzed_at FROM files')
+    c.execute('SELECT id, path, filename, language, analyzed_at, analysis_error FROM files')
     rows = c.fetchall()
     conn.close()
 
     result = []
     for r in rows:
+        status = file_status(r)
         item = {
             'id': r['id'],
             'filename': r['filename'],
             'path': r['path'],
             'language': r['language'],
             'analyzed_at': r['analyzed_at'],
-            'analyzed': bool(r['analyzed_at'])
+            'analysis_error': r['analysis_error'],
+            'status': status,
+            'analyzed': status == 'analyzed'
         }
         if name is None or name.lower() in item['filename'].lower():
             result.append(item)
@@ -170,13 +225,13 @@ def get_file(file_id: int):
 
     conn = get_conn()
     c = conn.cursor()
-    c.execute('SELECT id, filename, path, language, analyzed_at FROM files WHERE id=?', (file_id,))
+    c.execute('SELECT id, filename, path, language, analyzed_at, analysis_error FROM files WHERE id=?', (file_id,))
     r = c.fetchone()
     conn.close()
     if not r:
         logger.error(f"Fichier non trouvé pour reanalyse: id={file_id}")
         raise HTTPException(status_code=404, detail='File not found')
-    return dict(r)
+    return {**dict(r), 'status': file_status(r)}
 
 @app.post('/api/rescan')
 def analyze_new():
@@ -218,49 +273,40 @@ def analyze_all():
     files = c.fetchall()
     count = len(files) 
 
-    for file in files:
-        file_path = file['path']
-        file_filename = file['filename']
-        lang = ffprobe_get_audio_language(file_path)
-        analyzed_at = datetime.utcnow().isoformat()
-        
-        # Créer un nouveau cursor pour les UPDATE/INSERT
-        c2 = conn.cursor()
-        c2.execute(
-            'INSERT OR REPLACE INTO files (path, filename, language, analyzed_at) VALUES (?,?,?,?)',
-            (file_path, file_filename, lang, analyzed_at)
-        )
-        c2.close()
-    conn.commit()
-    conn.close()
-    return {'status': 'ok', 'count': count}
+    errors = 0
+    try:
+        for file in files:
+            lang, error = ffprobe_get_audio_language(file['path'])
+            errors += bool(error)
+            # UPDATE par id (et non INSERT OR REPLACE) pour conserver l'id du fichier :
+            # un REPLACE supprime puis recrée la ligne, ce qui change son id
+            save_analysis(conn, file['id'], lang, error)
+        conn.commit()
+    finally:
+        conn.close()
+    return {'status': 'ok', 'count': count, 'errors': errors}
 
 @app.post('/api/analyze_new')
-def analyze_new():        
+def analyze_new():
     logger.info("Analyser tous les fichiers pas encore analysé")
-    
+
     conn = get_conn()
     c = conn.cursor()
-    # Parcours les fichiers déjà en base, mais non analysés, analyzed_at == null    
-    c.execute('SELECT id, path, filename FROM files WHERE analyzed_at IS NULL')
+    # Fichiers en base jamais analysés, ou dont la dernière analyse a échoué
+    c.execute('SELECT id, path, filename FROM files WHERE analyzed_at IS NULL OR analysis_error IS NOT NULL')
     files = c.fetchall()
     count = len(files)
 
-    for file in files:
-        file_id = file['id']
-        file_path = file['path']
-        file_filename = file['filename']
-        lang = ffprobe_get_audio_language(file_path)
-        analyzed_at = datetime.utcnow().isoformat()
-        c2 = conn.cursor()
-        c2.execute(
-            'UPDATE files SET language=?, analyzed_at=? WHERE id=?',
-            (lang, analyzed_at, file_id)
-        )
-        c2.close()
-    conn.commit()
-    conn.close()
-    return {'status': 'ok', 'count': count}
+    errors = 0
+    try:
+        for file in files:
+            lang, error = ffprobe_get_audio_language(file['path'])
+            errors += bool(error)
+            save_analysis(conn, file['id'], lang, error)
+        conn.commit()
+    finally:
+        conn.close()
+    return {'status': 'ok', 'count': count, 'errors': errors}
     
 @app.post('/api/files/{file_id}/analyze')
 def analyze_one(file_id: int):
@@ -278,22 +324,16 @@ def analyze_one(file_id: int):
     path = r['path']
 
     # Analyse le fichier avec ffprobe
-    lang = ffprobe_get_audio_language(path)
+    try:
+        lang, error = ffprobe_get_audio_language(path)
+        logger.debug(f"Langue du fichier audio: {lang}")
+        save_analysis(conn, file_id, lang, error)
+        conn.commit()
+    finally:
+        conn.close()
 
-    # Mise à jour de la base
-    analyzed_at = datetime.utcnow().isoformat()
-    logger.debug(f"Langue du fichier audio: {lang}")
-    conn = get_conn()
-    c = conn.cursor()
-    c.execute(
-            'UPDATE files SET language=?, analyzed_at=? WHERE id=?',
-            (lang, analyzed_at, file_id)
-        )
-    conn.commit()
-    conn.close()
-
-    logger.info(f"Analyse du fichier audio effectué: {lang}")
-    return {'status': 'ok', 'language': lang}
+    logger.info(f"Analyse du fichier audio effectué: {lang} (erreur: {error})")
+    return {'status': 'error' if error else 'ok', 'language': lang, 'error': error}
 
 @app.post('/api/files/{file_id}/reanalyze')
 def reanalyze(file_id: int):
@@ -312,28 +352,49 @@ def reanalyze(file_id: int):
 
     # Analyse le fichier avec ffprobe
     logger.info(f"Re-Analyse du fichier audio avec ffprobe: {path}")
-    lang = ffprobe_get_audio_language(path)
+    try:
+        lang, error = ffprobe_get_audio_language(path)
+        logger.debug(f"Langue du fichier audio: {lang}")
+        save_analysis(conn, file_id, lang, error)
+        conn.commit()
+    finally:
+        conn.close()
 
-    # Mise à jour de la base
-    analyzed_at = datetime.utcnow().isoformat()
-    logger.debug(f"Langue du fichier audio: {lang}")
-    c.execute('UPDATE files SET language=?, analyzed_at=? WHERE id=?',
-              (lang, analyzed_at, file_id))
-    conn.commit()
+    logger.info(f"Re-Analyse du fichier audio effectué: {lang} (erreur: {error})")
+    return {'status': 'error' if error else 'ok', 'language': lang, 'error': error}
+
+@app.get('/api/files/{file_id}/tracks')
+def get_tracks(file_id: int):
+    """Liste les pistes audio du fichier, lues directement sur le disque"""
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute('SELECT path FROM files WHERE id=?', (file_id,))
+    r = c.fetchone()
     conn.close()
-
-    logger.info(f"Re-Analyse du fichier audio effectué: {lang}")
-    return {'status': 'ok', 'language': lang}
+    if not r:
+        logger.error(f"Fichier non trouvé pour la liste des pistes: id={file_id}")
+        raise HTTPException(status_code=404, detail='File not found')
+    path = r['path']
+    try:
+        tracks = audio_tracks(ffprobe_streams(path))
+    except Exception as exc:
+        logger.exception(f"Lecture des pistes impossible pour {path}")
+        raise HTTPException(status_code=500, detail='Unable to read audio tracks') from exc
+    return {
+        'tracks': tracks,
+        'language_editable': Path(path).suffix.lower() not in LANGUAGE_UNSUPPORTED_EXTS,
+    }
 
 # -------------------------
 # Modèle Pydantic
 # -------------------------
 class SetLangModel(BaseModel):
     language: str
-    
+    track: int = 0  # index relatif de la piste audio (a:N)
+
 @app.post('/api/files/{file_id}/set_language')
 def set_language(file_id: int, model: SetLangModel):
-    logger.info(f"Demande de changement de langue du fichier audio ({file_id})")
+    logger.info(f"Demande de changement de langue du fichier audio ({file_id}, piste a:{model.track})")
 
     conn = get_conn()
     c = conn.cursor()
@@ -345,8 +406,21 @@ def set_language(file_id: int, model: SetLangModel):
         raise HTTPException(status_code=404, detail='File not found')
     src = r['path']
 
+    # Le muxer AVI de ffmpeg n'écrit pas la langue des pistes : l'opération
+    # « réussirait » sans rien changer au fichier
+    if Path(src).suffix.lower() in LANGUAGE_UNSUPPORTED_EXTS:
+        conn.close()
+        logger.warning(f"Changement de langue refusé, conteneur non supporté: {src}")
+        raise HTTPException(status_code=400, detail=f'Container {Path(src).suffix} cannot store audio language')
+
     tmp_path = None
     try:
+        source_streams = ffprobe_streams(src)
+        source_tracks = audio_tracks(source_streams)
+        if not 0 <= model.track < len(source_tracks):
+            logger.error(f"Piste audio a:{model.track} inexistante dans {src} ({len(source_tracks)} piste(s))")
+            raise HTTPException(status_code=400, detail=f'Audio track {model.track} does not exist')
+
         tmp_fd, tmp_path = tempfile.mkstemp(
             dir=Path(src).parent,
             suffix=Path(src).suffix
@@ -356,12 +430,12 @@ def set_language(file_id: int, model: SetLangModel):
         source_size = os.path.getsize(src)
         logger.info(
             f"Changer la langue audio: {src} ({source_size} octets) "
-            f"-> {model.language}; fichier temporaire: {tmp_path}"
+            f"piste a:{model.track} -> {model.language}; fichier temporaire: {tmp_path}"
         )
         cmd = [
             'ffmpeg', '-y', '-hide_banner', '-loglevel', 'error', '-i', src,
             '-map', '0', '-c', 'copy',
-            f'-metadata:s:a:0', f'language={model.language}', tmp_path
+            f'-metadata:s:a:{model.track}', f'language={model.language}', tmp_path
         ]
         res = subprocess.run(cmd, capture_output=True, text=True)
         if res.returncode != 0:
@@ -373,26 +447,33 @@ def set_language(file_id: int, model: SetLangModel):
             logger.error(f"Sortie ffmpeg vide pour {src}: {tmp_path}")
             raise HTTPException(status_code=500, detail='ffmpeg produced an empty file')
 
-        probe_cmd = [
-            'ffprobe', '-v', 'error', '-show_entries', 'stream=index',
-            '-of', 'json', tmp_path
-        ]
-        probe_res = subprocess.run(probe_cmd, capture_output=True, text=True)
-        if probe_res.returncode != 0:
-            logger.error(f"Validation ffprobe échouée pour {tmp_path}: {probe_res.stderr}")
+        # Validation de la sortie avant de toucher à l'original : même nombre de flux
+        # (aucun flux perdu par le remux) et langue effectivement écrite sur la piste
+        try:
+            output_streams = ffprobe_streams(tmp_path)
+        except subprocess.CalledProcessError as exc:
+            logger.error(f"Validation ffprobe échouée pour {tmp_path}: {exc.stderr}")
             raise HTTPException(status_code=500, detail='ffprobe validation failed')
-        if not json.loads(probe_res.stdout).get('streams'):
-            logger.error(f"Aucun flux détecté dans la sortie ffmpeg: {tmp_path}")
-            raise HTTPException(status_code=500, detail='ffmpeg produced a file without streams')
+        if len(output_streams) != len(source_streams):
+            logger.error(
+                f"Flux perdus par ffmpeg pour {src}: {len(source_streams)} -> {len(output_streams)}"
+            )
+            raise HTTPException(status_code=500, detail='ffmpeg output is missing streams')
+        output_tracks = audio_tracks(output_streams)
+        if output_tracks[model.track]['language'] != model.language:
+            logger.error(f"Langue non écrite dans la sortie ffmpeg pour {src}: {output_tracks[model.track]}")
+            raise HTTPException(status_code=500, detail='Language was not written to the output file')
 
         os.chmod(tmp_path, source_mode)
-        safe_move(tmp_path, src)
-        logger.info(f"Remplacement atomique réussi: {src} ({source_size} -> {output_size} octets)")
-        analyzed_at = datetime.utcnow().isoformat()
-        c.execute(
-            'UPDATE files SET language=?, analyzed_at=? WHERE id=?',
-            (model.language, analyzed_at, file_id)
-        )
+        backup_path = safe_move(tmp_path, src)
+        logger.info(f"Remplacement réussi: {src} ({source_size} -> {output_size} octets)")
+        if backup_path:
+            logger.info(f"Original conservé: {backup_path}")
+
+        # La langue affichée est celle de la piste principale, qui n'est pas
+        # forcément celle qui vient d'être modifiée
+        lang = primary_language(output_tracks)
+        save_analysis(conn, file_id, lang, None)
         conn.commit()
     except HTTPException:
         raise
@@ -403,10 +484,27 @@ def set_language(file_id: int, model: SetLangModel):
         if tmp_path and os.path.exists(tmp_path):
             os.remove(tmp_path)
         conn.close()
-    return {'status': 'ok', 'language': model.language}
+    return {'status': 'ok', 'language': lang, 'tracks': output_tracks}
 
 # -------------------------
 # Safe move, meme pour nas
 # -------------------------
 def safe_move(src, dst):
-    os.replace(src, dst)
+    """Remplace dst par src. Si BACKUP_ON_SET_LANGUAGE est actif, l'original est
+    conservé en <dst>.bak (ignoré par le scan) ; retourne alors son chemin."""
+    if not BACKUP_ON_SET_LANGUAGE:
+        os.replace(src, dst)
+        return None
+    backup_path = f"{dst}.bak"
+    if os.path.exists(backup_path):
+        # Un .bak existe déjà : c'est l'original d'avant toute modification, on le garde
+        os.replace(src, dst)
+        return backup_path
+    os.replace(dst, backup_path)
+    try:
+        os.replace(src, dst)
+    except Exception:
+        # Remet l'original en place si le remplacement échoue
+        os.replace(backup_path, dst)
+        raise
+    return backup_path

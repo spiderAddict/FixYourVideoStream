@@ -58,15 +58,13 @@
                     <option value="">Tous les statuts</option>
                     <option value="analyzed">Analysé</option>
                     <option value="not_analyzed">Non analysé</option>
+                    <option value="error">En erreur</option>
                   </select>
                 </div>
                 <div class="select">
+                  <!-- Options générées par app.js à partir des langues présentes en base -->
                   <select id="filterLang">
                     <option value="">Toutes les langues</option>
-                    <option value="fr">Français</option>
-                    <option value="en">Anglais</option>
-                    <option value="es">Espagnol</option>
-                    <!-- Ajoute d'autres langues si besoin -->
                   </select>
                 </div>
               </div>
@@ -130,10 +128,12 @@
         <p><strong>Path :</strong> <code>{{path}}</code></p>
         <p><strong>Analysé :</strong> {{analyzed}}</p>
         <p><strong>Langue :</strong> {{language}}</p>
+        <p><strong>Pistes audio :</strong></p>
+        <div id="tracks"><p class="is-size-7">Lecture des pistes...</p></div>
       </div>
       <div class="buttons">
         <button id="analyze" class="button is-link">🔄 Analyser</button>
-        <button id="setFr" class="button is-warning">🇫🇷 Forcer FR</button>
+        <button id="setFr" class="button is-warning" disabled>🇫🇷 Forcer FR sur la piste sélectionnée</button>
       </div>
     </script>
 

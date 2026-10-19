@@ -18,6 +18,12 @@ uvicorn backend.main:app --reload
 ## Lancer le conteneur et monter le dossier vidéo
 ```docker run -it --rm -p 8000:8000 -v ./test_videos:/videos -v fixyourvideostream_data:/data fixyourvideostream```
 
+## Changement de langue audio
+- La langue est modifiée sur la piste audio choisie dans le panneau de détail (pas forcément la première).
+- Les fichiers `.avi` ne peuvent pas stocker la langue des pistes : l'action y est refusée.
+- `BACKUP_ON_SET_LANGUAGE=true` conserve l'original en `<fichier>.bak` avant la première modification
+  (désactivé par défaut car cela double l'espace disque du fichier modifié).
+
 ## Prompt ChatGpt
 ```
 Je voudrais une application web qui me permette d'analyser le contenu d'un répertoire, et pour chaque fichier vidéo trouvé, elle affichera la langue inscrite dans les metadonnées des pistes audio. 
