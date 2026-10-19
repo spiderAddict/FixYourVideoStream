@@ -18,6 +18,10 @@ uvicorn backend.main:app --reload
 ## Lancer le conteneur et monter le dossier vidéo
 ```docker run -it --rm -p 8000:8000 -v ./test_videos:/videos -v fixyourvideostream_data:/data fixyourvideostream```
 
+## Scan du répertoire
+- « Scan pour nouveaux » ajoute les nouveaux fichiers et retire de la base ceux qui n'existent plus sur le disque.
+- Si le répertoire vidéo est absent ou entièrement vide (volume non monté), aucun fichier n'est retiré.
+
 ## Changement de langue audio
 - La langue est modifiée sur la piste audio choisie dans le panneau de détail (pas forcément la première).
 - Les fichiers `.avi` ne peuvent pas stocker la langue des pistes : l'action y est refusée.

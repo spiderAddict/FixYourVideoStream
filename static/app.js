@@ -189,7 +189,11 @@ document.addEventListener('DOMContentLoaded', () => {
   };
 });
 
+// Id du fichier affiché dans le panneau de détail
+let currentDetailId = null;
+
 async function showDetail(file){
+  currentDetailId = file.id;
   const pane = document.getElementById('detailPane');
   pane.classList.remove('is-hidden');
 
@@ -313,8 +317,17 @@ document.getElementById('analyzeAll').onclick = async () => {
 document.getElementById('rescan').onclick = async () => {
     try {
       showLoader();
-      await api('/api/rescan', { method: 'POST' });
+      const res = await api('/api/rescan', { method: 'POST' });
+      showNotification(`${res.count} fichier(s) ajouté(s), ${res.removed} retiré(s)`, "success");
+      if (res.purge_skipped) {
+        showNotification("Répertoire vidéo absent ou vide (volume non monté ?) : fichiers disparus conservés", "error");
+      }
       await loadList();
+      // Ferme le détail si le fichier affiché a été retiré
+      if (currentDetailId !== null && !allFiles.some(f => f.id === currentDetailId)) {
+        document.getElementById('detailPane').classList.add('is-hidden');
+        currentDetailId = null;
+      }
     } catch (e) {
       showNotification("Erreur : " + e.message, "error");
     } finally {

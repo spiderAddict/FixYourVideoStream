@@ -247,20 +247,41 @@ def get_file(file_id: int):
         raise HTTPException(status_code=404, detail='File not found')
     return {**dict(r), 'status': file_status(r)}
 
-@app.post('/api/rescan')
-def analyze_new():
-    logger.info(f"Analyser tous les fichiers dans {VIDEOS_DIR}")
-    files = scan_directory()
+def videos_dir_looks_unmounted():
+    """Vrai si VIDEOS_DIR est absent ou totalement vide : c'est le symptôme d'un
+    volume (NAS) non monté, pas d'une vidéothèque vidée"""
+    p = Path(VIDEOS_DIR)
+    return not p.is_dir() or next(p.iterdir(), None) is None
 
-    count = 0
+@app.post('/api/rescan')
+def rescan():
+    """Synchronise la base avec le répertoire : ajoute les nouveaux fichiers et
+    retire ceux qui n'existent plus sur le disque"""
+    logger.info(f"Scan des fichiers dans {VIDEOS_DIR}")
+    found = {str(f): f.name for f in scan_directory()}
+
     with db() as conn:
-        for f in files:
-            pathstr = str(f)
-            if conn.execute('SELECT id FROM files WHERE path=?', (pathstr,)).fetchone():
-                continue  # déjà en base
-            conn.execute('INSERT INTO files (path, filename) VALUES (?,?)', (pathstr, f.name))
-            count += 1
-    return {'status': 'ok', 'count': count}
+        known = {r['path'] for r in conn.execute('SELECT path FROM files')}
+        added = [p for p in found if p not in known]
+        conn.executemany(
+            'INSERT INTO files (path, filename) VALUES (?,?)',
+            [(p, found[p]) for p in added]
+        )
+
+        missing = [p for p in known if p not in found]
+        # Sans ce garde-fou, un montage absent effacerait toutes les analyses
+        purge_skipped = bool(missing) and videos_dir_looks_unmounted()
+        if purge_skipped:
+            logger.warning(
+                f"{VIDEOS_DIR} est absent ou vide : purge de {len(missing)} fichier(s) annulée"
+            )
+            missing = []
+        conn.executemany('DELETE FROM files WHERE path=?', [(p,) for p in missing])
+
+    for p in missing:
+        logger.info(f"Fichier retiré de la base (absent du disque): {p}")
+    logger.info(f"Scan terminé: {len(added)} ajouté(s), {len(missing)} retiré(s)")
+    return {'status': 'ok', 'count': len(added), 'removed': len(missing), 'purge_skipped': purge_skipped}
 
 
 def analyze_files(files):
