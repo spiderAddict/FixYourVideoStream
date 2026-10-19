@@ -18,32 +18,38 @@ async function api(url, opts) {
     return r.json();
 }
 
-function escapeHtml(text){
-  const div = document.createElement('div');
-  div.textContent = text;
-  return div.innerHTML;
-}
-
 // Signale les fichiers en erreur après une analyse en masse
 function notifyAnalysisErrors(res){
   if (res.errors) showNotification(`${res.errors} fichier(s) en erreur d'analyse`, "error");
 }
 
-function renderTemplate(templateId, data){
-  let tpl = document.getElementById(templateId).innerHTML;
-  for (let key in data){
-    const regex = new RegExp(`{{${key}}}`, 'g');
-    tpl = tpl.replace(regex, data[key]);
-  }
-  return tpl;
+// Crée un élément dont le contenu est posé en texte : les noms de fichiers, chemins
+// et métadonnées viennent du disque et ne doivent jamais être interprétés comme du HTML
+function el(tag, className, text){
+  const e = document.createElement(tag);
+  if (className) e.className = className;
+  if (text !== undefined) e.textContent = text;
+  return e;
 }
 
 // Pastille de statut d'analyse dans la liste
 const STATUS_TAGS = {
-  analyzed: `<span class="tag is-success" title="Analysé">✓</span>`,
-  not_analyzed: `<span class="tag is-warning" title="Pas encore analysé">⏳</span>`,
-  error: `<span class="tag is-danger" title="Erreur d'analyse">✗</span>`
+  analyzed: {className: 'tag is-success', title: 'Analysé', text: '✓'},
+  not_analyzed: {className: 'tag is-warning', title: 'Pas encore analysé', text: '⏳'},
+  error: {className: 'tag is-danger', title: "Erreur d'analyse", text: '✗'}
 };
+
+function statusTag(status){
+  const def = STATUS_TAGS[status];
+  const tag = el('span', def.className, def.text);
+  tag.title = def.title;
+  return tag;
+}
+
+// Pastille de langue ; `unknownText` si aucune langue n'est renseignée
+function languageTag(language, unknownText){
+  return language ? el('span', 'tag is-info', language) : el('span', 'tag is-light', unknownText);
+}
 
 // Valeur du filtre de langue pour les fichiers sans langue renseignée
 const NO_LANGUAGE = '__none__';
@@ -87,8 +93,10 @@ function renderPagination(total, page, pageSize) {
     li.innerHTML = `<a class="pagination-link${i === page ? ' is-current' : ''}" data-page="${i}">${i}</a>`;
     paginationList.appendChild(li);
   }
-  document.getElementById('prevPage').disabled = (page === 1);
-  document.getElementById('nextPage').disabled = (page === pageCount || pageCount === 0);
+  // .disabled n'existe pas sur un <a> : l'attribut sert au style Bulma,
+  // les bornes sont vérifiées dans les handlers
+  document.getElementById('prevPage').toggleAttribute('disabled', page <= 1);
+  document.getElementById('nextPage').toggleAttribute('disabled', page >= pageCount);
 
   // Ajout des événements
   paginationList.querySelectorAll('.pagination-link').forEach(link => {
@@ -103,8 +111,8 @@ function renderPagination(total, page, pageSize) {
       renderList();
     }
   };
+  // pageCount est celui de la liste filtrée, pas de tous les fichiers
   document.getElementById('nextPage').onclick = () => {
-    const pageCount = Math.ceil(allFiles.length / pageSize);
     if (currentPage < pageCount) {
       currentPage++;
       renderList();
@@ -135,31 +143,24 @@ function renderList() {
   const list = document.getElementById('fileList');
   list.innerHTML = "";
   const filteredFiles = getFilteredFiles();
+  // Après un rechargement, la page courante peut ne plus exister (fichiers retirés)
+  const pageCount = Math.max(1, Math.ceil(filteredFiles.length / pageSize));
+  currentPage = Math.min(currentPage, pageCount);
   const start = (currentPage - 1) * pageSize;
   const end = start + pageSize;
   const files = filteredFiles.slice(start, end);
 
   for (let f of files) {
-    const statusTag = STATUS_TAGS[f.status];
+    const link = el('a', 'file-item', f.filename);
+    link.dataset.id = f.id;
+    link.style.cursor = 'pointer';
+    link.onclick = () => showDetail(f);
 
-    const langTag = f.language
-      ? `<span class="tag is-info">${f.language}</span>`
-      : `<span class="tag is-light">?</span>`;
-
-    const html = `
-      <tr>
-        <td>
-          <a class="file-item" data-id="${f.id}" style="cursor:pointer">${f.filename}</a>
-        </td>
-        <td>${statusTag}</td>
-        <td>${langTag}</td>
-      </tr>
-    `;
-
-    const wrapper = document.createElement("tr");
-    wrapper.innerHTML = html;
-    wrapper.querySelector(".file-item").onclick = () => showDetail(f);
-    list.appendChild(wrapper);
+    const row = document.createElement('tr');
+    for (const content of [link, statusTag(f.status), languageTag(f.language, '?')]) {
+      row.appendChild(el('td')).appendChild(content);
+    }
+    list.appendChild(row);
   }
   renderPagination(filteredFiles.length, currentPage, pageSize);
 }
@@ -197,23 +198,22 @@ async function showDetail(file){
   const pane = document.getElementById('detailPane');
   pane.classList.remove('is-hidden');
 
-  const analyzedTag = {
-    analyzed: `<span class="tag is-success">Oui</span>`,
-    not_analyzed: `<span class="tag is-warning">Non</span>`,
-    error: `<span class="tag is-danger">Erreur</span> ${escapeHtml(file.analysis_error || '')}`
-  }[file.status];
+  // Le template est statique ; les données sont ensuite posées en texte dans ses emplacements
+  pane.innerHTML = document.getElementById('detail-template').innerHTML;
+  const field = name => pane.querySelector(`[data-field="${name}"]`);
+  field('filename').textContent = file.filename;
+  field('path').textContent = file.path;
 
-  const languageTag = file.language 
-    ? `<span class="tag is-info">${file.language}</span>` 
-    : `<span class="tag is-light">Inconnue</span>`;
+  const analyzed = field('analyzed');
+  if (file.status === 'error') {
+    analyzed.append(el('span', 'tag is-danger', 'Erreur'), ' ' + (file.analysis_error || ''));
+  } else {
+    analyzed.append(file.status === 'analyzed'
+      ? el('span', 'tag is-success', 'Oui')
+      : el('span', 'tag is-warning', 'Non'));
+  }
+  field('language').append(languageTag(file.language, 'Inconnue'));
 
-  pane.innerHTML = renderTemplate("detail-template", {
-    filename: file.filename,
-    path: file.path,
-    analyzed: analyzedTag,
-    language: languageTag
-  });
-  
   // Analyse si jamais faite, réanalyse sinon
   const analyzeUrl = file.analyzed_at
     ? `/api/files/${file.id}/reanalyze`
@@ -224,8 +224,6 @@ async function showDetail(file){
       const res = await api(analyzeUrl, {method:'POST'});
       if (res.error) showNotification("Analyse en échec : " + res.error, "error");
       await loadList();
-      // Réaffiche le détail avec les données rechargées
-      showDetail(allFiles.find(f => f.id === file.id) || file);
     } catch (e) {
       showNotification("Erreur : " + e.message, "error");
     } finally {
@@ -245,8 +243,6 @@ async function showDetail(file){
         body: JSON.stringify({language:'fra', track: parseInt(selected.value)})
       });
       await loadList();
-      // Réaffiche le détail avec les données rechargées (langue principale mise à jour)
-      showDetail(allFiles.find(f => f.id === file.id) || file);
     } catch (e) {
       showNotification("Erreur : " + e.message, "error");
     } finally {
@@ -353,11 +349,6 @@ document.getElementById('rescan').onclick = async () => {
         showNotification("Répertoire vidéo absent ou vide (volume non monté ?) : fichiers disparus conservés", "error");
       }
       await loadList();
-      // Ferme le détail si le fichier affiché a été retiré
-      if (currentDetailId !== null && !allFiles.some(f => f.id === currentDetailId)) {
-        document.getElementById('detailPane').classList.add('is-hidden');
-        currentDetailId = null;
-      }
     } catch (e) {
       showNotification("Erreur : " + e.message, "error");
     } finally {
@@ -373,14 +364,27 @@ async function loadTheme(){
   document.getElementById('themeSelector').value = res.theme;
 }
 
+// Recharge la liste en gardant la page courante, et le détail ouvert à jour
 async function loadList() {
   try {
     allFiles = await api('/api/files');
     refreshLanguageFilter();
-    currentPage = 1;
     renderList();
+    await refreshDetail();
   } catch (e) {
     showNotification("Erreur lors du chargement de la liste : " + e.message, "error");
+  }
+}
+
+// Réaffiche le détail ouvert avec les données rechargées, ou le ferme si le fichier a été retiré
+async function refreshDetail() {
+  if (currentDetailId === null) return;
+  const file = allFiles.find(f => f.id === currentDetailId);
+  if (file) {
+    await showDetail(file);
+  } else {
+    document.getElementById('detailPane').classList.add('is-hidden');
+    currentDetailId = null;
   }
 }
 document.getElementById('themeSelector').onchange = async (e)=>{

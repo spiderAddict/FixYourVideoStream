@@ -123,11 +123,12 @@
     </script>
 
       <script type="text/template" id="detail-template">
-      <h3 class="title is-5">{{filename}}</h3>
+      <!-- Les emplacements data-field sont remplis en texte par app.js (jamais en HTML) -->
+      <h3 class="title is-5" data-field="filename"></h3>
       <div class="content">
-        <p><strong>Path :</strong> <code>{{path}}</code></p>
-        <p><strong>Analysé :</strong> {{analyzed}}</p>
-        <p><strong>Langue :</strong> {{language}}</p>
+        <p><strong>Path :</strong> <code data-field="path"></code></p>
+        <p><strong>Analysé :</strong> <span data-field="analyzed"></span></p>
+        <p><strong>Langue :</strong> <span data-field="language"></span></p>
         <p><strong>Pistes audio :</strong></p>
         <div id="tracks"><p class="is-size-7">Lecture des pistes...</p></div>
       </div>
