@@ -5,6 +5,7 @@ import json
 import tempfile
 import logging
 import stat
+from contextlib import contextmanager
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -59,10 +60,33 @@ def get_conn():
     conn.row_factory = sqlite3.Row
     return conn
 
+@contextmanager
+def db():
+    """Connexion limitée à un bloc `with` : commit si le bloc réussit, rollback
+    s'il lève une exception, et fermeture dans tous les cas"""
+    conn = get_conn()
+    try:
+        yield conn
+        conn.commit()
+    except BaseException:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+def get_file_path(file_id):
+    """Chemin du fichier en base, ou None si l'id est inconnu"""
+    with db() as conn:
+        r = conn.execute('SELECT path FROM files WHERE id=?', (file_id,)).fetchone()
+    return r['path'] if r else None
+
 def init_db():
     logger.info(f"Initialisation de la base")
-        
-    conn = get_conn()
+
+    with db() as conn:
+        init_schema(conn)
+
+def init_schema(conn):
     c = conn.cursor()
     c.execute('''
     CREATE TABLE IF NOT EXISTS files (
@@ -84,8 +108,6 @@ def init_db():
     if 'analysis_error' not in columns:
         logger.info("Migration de la base: ajout de la colonne files.analysis_error")
         c.execute('ALTER TABLE files ADD COLUMN analysis_error TEXT')
-    conn.commit()
-    conn.close()
 
 init_db()
 
@@ -168,11 +190,8 @@ def scan_directory():
 
 @app.get('/api/theme')
 def get_theme():
-    conn = get_conn()
-    c = conn.cursor()
-    c.execute('SELECT value FROM settings WHERE key="theme"')
-    r = c.fetchone()
-    conn.close()
+    with db() as conn:
+        r = conn.execute("SELECT value FROM settings WHERE key='theme'").fetchone()
     if r:
         return {"theme": r['value']}
     return {"theme": "plex"}  # valeur par défaut
@@ -184,11 +203,8 @@ class ThemeModel(BaseModel):
 def set_theme(model: ThemeModel):
     if model.theme not in ["plex", "sonarr", "jellyfin"]:
         raise HTTPException(status_code=400, detail="Invalid theme")
-    conn = get_conn()
-    c = conn.cursor()
-    c.execute('REPLACE INTO settings (key, value) VALUES (?, ?)', ("theme", model.theme))
-    conn.commit()
-    conn.close()
+    with db() as conn:
+        conn.execute('REPLACE INTO settings (key, value) VALUES (?, ?)', ("theme", model.theme))
     return {"status": "ok", "theme": model.theme}
 
 
@@ -197,11 +213,10 @@ def set_theme(model: ThemeModel):
 # -------------------------
 @app.get('/api/files')
 def list_files(name: str = Query(None, description="Filtre sur le nom du fichier")):
-    conn = get_conn()
-    c = conn.cursor()
-    c.execute('SELECT id, path, filename, language, analyzed_at, analysis_error FROM files')
-    rows = c.fetchall()
-    conn.close()
+    with db() as conn:
+        rows = conn.execute(
+            'SELECT id, path, filename, language, analyzed_at, analysis_error FROM files'
+        ).fetchall()
 
     result = []
     for r in rows:
@@ -222,14 +237,13 @@ def list_files(name: str = Query(None, description="Filtre sur le nom du fichier
 
 @app.get('/api/files/{file_id}')
 def get_file(file_id: int):
-
-    conn = get_conn()
-    c = conn.cursor()
-    c.execute('SELECT id, filename, path, language, analyzed_at, analysis_error FROM files WHERE id=?', (file_id,))
-    r = c.fetchone()
-    conn.close()
+    with db() as conn:
+        r = conn.execute(
+            'SELECT id, filename, path, language, analyzed_at, analysis_error FROM files WHERE id=?',
+            (file_id,)
+        ).fetchone()
     if not r:
-        logger.error(f"Fichier non trouvé pour reanalyse: id={file_id}")
+        logger.error(f"Fichier non trouvé: id={file_id}")
         raise HTTPException(status_code=404, detail='File not found')
     return {**dict(r), 'status': file_status(r)}
 
@@ -237,144 +251,87 @@ def get_file(file_id: int):
 def analyze_new():
     logger.info(f"Analyser tous les fichiers dans {VIDEOS_DIR}")
     files = scan_directory()
-    conn = get_conn()
-    c = conn.cursor()
 
     count = 0
-
-    for f in files:
-        pathstr = str(f)
-        filename = f.name
-        c.execute('SELECT id FROM files WHERE path=?', (pathstr,))
-        if c.fetchone():
-            continue  # déjà en base
-        else:
-            c.execute(
-                'INSERT INTO files (path, filename) VALUES (?,?)',
-                (pathstr, filename)
-            )
+    with db() as conn:
+        for f in files:
+            pathstr = str(f)
+            if conn.execute('SELECT id FROM files WHERE path=?', (pathstr,)).fetchone():
+                continue  # déjà en base
+            conn.execute('INSERT INTO files (path, filename) VALUES (?,?)', (pathstr, f.name))
             count += 1
-    conn.commit()
-    conn.close()
-
-    conn = get_conn()
-    c = conn.cursor()
     return {'status': 'ok', 'count': count}
-    
 
-@app.post('/api/analyze_all')
-def analyze_all():
-    logger.info("Analyser tous les fichiers")
-    
-    conn = get_conn()
-    c = conn.cursor()
-    # Parcours les fichiers déjà en base
-    c.execute('SELECT id, path, filename FROM files')
-    files = c.fetchall()
-    count = len(files) 
 
+def analyze_files(files):
+    """Analyse chaque fichier et enregistre le résultat ; retourne le nombre d'erreurs"""
     errors = 0
-    try:
+    with db() as conn:
         for file in files:
             lang, error = ffprobe_get_audio_language(file['path'])
             errors += bool(error)
             # UPDATE par id (et non INSERT OR REPLACE) pour conserver l'id du fichier :
             # un REPLACE supprime puis recrée la ligne, ce qui change son id
             save_analysis(conn, file['id'], lang, error)
-        conn.commit()
-    finally:
-        conn.close()
-    return {'status': 'ok', 'count': count, 'errors': errors}
+    return errors
+
+@app.post('/api/analyze_all')
+def analyze_all():
+    logger.info("Analyser tous les fichiers")
+
+    # Parcours les fichiers déjà en base
+    with db() as conn:
+        files = conn.execute('SELECT id, path, filename FROM files').fetchall()
+    errors = analyze_files(files)
+    return {'status': 'ok', 'count': len(files), 'errors': errors}
 
 @app.post('/api/analyze_new')
 def analyze_new():
     logger.info("Analyser tous les fichiers pas encore analysé")
 
-    conn = get_conn()
-    c = conn.cursor()
     # Fichiers en base jamais analysés, ou dont la dernière analyse a échoué
-    c.execute('SELECT id, path, filename FROM files WHERE analyzed_at IS NULL OR analysis_error IS NOT NULL')
-    files = c.fetchall()
-    count = len(files)
+    with db() as conn:
+        files = conn.execute(
+            'SELECT id, path, filename FROM files WHERE analyzed_at IS NULL OR analysis_error IS NOT NULL'
+        ).fetchall()
+    errors = analyze_files(files)
+    return {'status': 'ok', 'count': len(files), 'errors': errors}
 
-    errors = 0
-    try:
-        for file in files:
-            lang, error = ffprobe_get_audio_language(file['path'])
-            errors += bool(error)
-            save_analysis(conn, file['id'], lang, error)
-        conn.commit()
-    finally:
-        conn.close()
-    return {'status': 'ok', 'count': count, 'errors': errors}
-    
+def analyze_one_file(file_id):
+    """Analyse un fichier par son id et enregistre le résultat"""
+    path = get_file_path(file_id)
+    if not path:
+        logger.error(f"Fichier non trouvé pour analyse: id={file_id}")
+        raise HTTPException(status_code=404, detail='File not found')
+
+    # La connexion n'est pas gardée ouverte pendant ffprobe
+    lang, error = ffprobe_get_audio_language(path)
+    logger.debug(f"Langue du fichier audio: {lang}")
+    with db() as conn:
+        save_analysis(conn, file_id, lang, error)
+    return {'status': 'error' if error else 'ok', 'language': lang, 'error': error}
+
 @app.post('/api/files/{file_id}/analyze')
 def analyze_one(file_id: int):
     logger.info(f"Demande d'analyse du fichier audio ({file_id})")
-
-    # Récupère le chemin du fichier depuis la base
-    conn = get_conn()
-    c = conn.cursor()
-    c.execute('SELECT path FROM files WHERE id=?', (file_id,))
-    r = c.fetchone()
-    if not r:
-        conn.close()
-        logger.error(f"Fichier non trouvé pour analyse: id={file_id}")
-        raise HTTPException(status_code=404, detail='File not found')
-    path = r['path']
-
-    # Analyse le fichier avec ffprobe
-    try:
-        lang, error = ffprobe_get_audio_language(path)
-        logger.debug(f"Langue du fichier audio: {lang}")
-        save_analysis(conn, file_id, lang, error)
-        conn.commit()
-    finally:
-        conn.close()
-
-    logger.info(f"Analyse du fichier audio effectué: {lang} (erreur: {error})")
-    return {'status': 'error' if error else 'ok', 'language': lang, 'error': error}
+    result = analyze_one_file(file_id)
+    logger.info(f"Analyse du fichier audio effectué: {result['language']} (erreur: {result['error']})")
+    return result
 
 @app.post('/api/files/{file_id}/reanalyze')
 def reanalyze(file_id: int):
     logger.info(f"Demande de re-analyse du fichier audio ({file_id})")
-        
-    # Récupère le chemin du fichier depuis la base
-    conn = get_conn()
-    c = conn.cursor()
-    c.execute('SELECT path FROM files WHERE id=?', (file_id,))
-    r = c.fetchone()
-    if not r:
-        conn.close()
-        logger.error(f"Fichier non trouvé pour reanalyse: id={file_id}")
-        raise HTTPException(status_code=404, detail='File not found')
-    path = r['path']
-
-    # Analyse le fichier avec ffprobe
-    logger.info(f"Re-Analyse du fichier audio avec ffprobe: {path}")
-    try:
-        lang, error = ffprobe_get_audio_language(path)
-        logger.debug(f"Langue du fichier audio: {lang}")
-        save_analysis(conn, file_id, lang, error)
-        conn.commit()
-    finally:
-        conn.close()
-
-    logger.info(f"Re-Analyse du fichier audio effectué: {lang} (erreur: {error})")
-    return {'status': 'error' if error else 'ok', 'language': lang, 'error': error}
+    result = analyze_one_file(file_id)
+    logger.info(f"Re-Analyse du fichier audio effectué: {result['language']} (erreur: {result['error']})")
+    return result
 
 @app.get('/api/files/{file_id}/tracks')
 def get_tracks(file_id: int):
     """Liste les pistes audio du fichier, lues directement sur le disque"""
-    conn = get_conn()
-    c = conn.cursor()
-    c.execute('SELECT path FROM files WHERE id=?', (file_id,))
-    r = c.fetchone()
-    conn.close()
-    if not r:
+    path = get_file_path(file_id)
+    if not path:
         logger.error(f"Fichier non trouvé pour la liste des pistes: id={file_id}")
         raise HTTPException(status_code=404, detail='File not found')
-    path = r['path']
     try:
         tracks = audio_tracks(ffprobe_streams(path))
     except Exception as exc:
@@ -396,20 +353,14 @@ class SetLangModel(BaseModel):
 def set_language(file_id: int, model: SetLangModel):
     logger.info(f"Demande de changement de langue du fichier audio ({file_id}, piste a:{model.track})")
 
-    conn = get_conn()
-    c = conn.cursor()
-    c.execute('SELECT path FROM files WHERE id=?', (file_id,))
-    r = c.fetchone()
-    if not r:
-        conn.close()
+    src = get_file_path(file_id)
+    if not src:
         logger.error(f"Fichier non trouvé pour set_language: id={file_id}")
         raise HTTPException(status_code=404, detail='File not found')
-    src = r['path']
 
     # Le muxer AVI de ffmpeg n'écrit pas la langue des pistes : l'opération
     # « réussirait » sans rien changer au fichier
     if Path(src).suffix.lower() in LANGUAGE_UNSUPPORTED_EXTS:
-        conn.close()
         logger.warning(f"Changement de langue refusé, conteneur non supporté: {src}")
         raise HTTPException(status_code=400, detail=f'Container {Path(src).suffix} cannot store audio language')
 
@@ -473,8 +424,8 @@ def set_language(file_id: int, model: SetLangModel):
         # La langue affichée est celle de la piste principale, qui n'est pas
         # forcément celle qui vient d'être modifiée
         lang = primary_language(output_tracks)
-        save_analysis(conn, file_id, lang, None)
-        conn.commit()
+        with db() as conn:
+            save_analysis(conn, file_id, lang, None)
     except HTTPException:
         raise
     except Exception as exc:
@@ -483,7 +434,6 @@ def set_language(file_id: int, model: SetLangModel):
     finally:
         if tmp_path and os.path.exists(tmp_path):
             os.remove(tmp_path)
-        conn.close()
     return {'status': 'ok', 'language': lang, 'tracks': output_tracks}
 
 # -------------------------
