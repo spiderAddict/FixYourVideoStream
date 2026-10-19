@@ -135,6 +135,9 @@ function renderList() {
   const list = document.getElementById('fileList');
   list.innerHTML = "";
   const filteredFiles = getFilteredFiles();
+  // Après un rechargement, la page courante peut ne plus exister (fichiers retirés)
+  const pageCount = Math.max(1, Math.ceil(filteredFiles.length / pageSize));
+  currentPage = Math.min(currentPage, pageCount);
   const start = (currentPage - 1) * pageSize;
   const end = start + pageSize;
   const files = filteredFiles.slice(start, end);
@@ -224,8 +227,6 @@ async function showDetail(file){
       const res = await api(analyzeUrl, {method:'POST'});
       if (res.error) showNotification("Analyse en échec : " + res.error, "error");
       await loadList();
-      // Réaffiche le détail avec les données rechargées
-      showDetail(allFiles.find(f => f.id === file.id) || file);
     } catch (e) {
       showNotification("Erreur : " + e.message, "error");
     } finally {
@@ -245,8 +246,6 @@ async function showDetail(file){
         body: JSON.stringify({language:'fra', track: parseInt(selected.value)})
       });
       await loadList();
-      // Réaffiche le détail avec les données rechargées (langue principale mise à jour)
-      showDetail(allFiles.find(f => f.id === file.id) || file);
     } catch (e) {
       showNotification("Erreur : " + e.message, "error");
     } finally {
@@ -353,11 +352,6 @@ document.getElementById('rescan').onclick = async () => {
         showNotification("Répertoire vidéo absent ou vide (volume non monté ?) : fichiers disparus conservés", "error");
       }
       await loadList();
-      // Ferme le détail si le fichier affiché a été retiré
-      if (currentDetailId !== null && !allFiles.some(f => f.id === currentDetailId)) {
-        document.getElementById('detailPane').classList.add('is-hidden');
-        currentDetailId = null;
-      }
     } catch (e) {
       showNotification("Erreur : " + e.message, "error");
     } finally {
@@ -373,14 +367,27 @@ async function loadTheme(){
   document.getElementById('themeSelector').value = res.theme;
 }
 
+// Recharge la liste en gardant la page courante, et le détail ouvert à jour
 async function loadList() {
   try {
     allFiles = await api('/api/files');
     refreshLanguageFilter();
-    currentPage = 1;
     renderList();
+    await refreshDetail();
   } catch (e) {
     showNotification("Erreur lors du chargement de la liste : " + e.message, "error");
+  }
+}
+
+// Réaffiche le détail ouvert avec les données rechargées, ou le ferme si le fichier a été retiré
+async function refreshDetail() {
+  if (currentDetailId === null) return;
+  const file = allFiles.find(f => f.id === currentDetailId);
+  if (file) {
+    await showDetail(file);
+  } else {
+    document.getElementById('detailPane').classList.add('is-hidden');
+    currentDetailId = null;
   }
 }
 document.getElementById('themeSelector').onchange = async (e)=>{
