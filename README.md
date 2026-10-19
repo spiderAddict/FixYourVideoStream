@@ -16,7 +16,13 @@ uvicorn backend.main:app --reload
 ```docker build -t fixyourvideostream . ```
 
 ## Lancer le conteneur et monter le dossier vidéo
-```docker run -it --rm -p 8000:8000 -v ./test_videos:/videos -v fixyourvideostream_data:/data fixyourvideostream```
+```docker run -it --rm -p 8000:8000 -e PUID=1000 -e PGID=1000 -v ./test_videos:/videos -v fixyourvideostream_data:/data fixyourvideostream```
+
+- `PUID` / `PGID` (défaut `1000`) : utilisateur et groupe qui exécutent l'application. Ils doivent avoir le droit
+  d'écrire dans le dossier vidéo pour changer la langue (sur un NAS : l'UID/GID propriétaire des fichiers).
+  Le conteneur démarre en root, applique ces valeurs, donne `/data` à cet utilisateur puis abandonne les droits root.
+  Les droits de `/videos` ne sont jamais modifiés.
+- `--user` reste possible : PUID/PGID sont alors ignorés.
 
 ## Scan du répertoire
 - « Scan pour nouveaux » ajoute les nouveaux fichiers et retire de la base ceux qui n'existent plus sur le disque.
