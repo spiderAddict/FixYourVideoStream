@@ -39,6 +39,12 @@ uvicorn backend.main:app --reload
 - `BACKUP_ON_SET_LANGUAGE=true` conserve l'original en `<fichier>.bak` avant la première modification
   (désactivé par défaut car cela double l'espace disque du fichier modifié).
 
+## Sécurité
+- L'application n'a **aucune authentification**, alors qu'elle peut réécrire les fichiers vidéo.
+  Elle est prévue pour un réseau local de confiance : ne pas exposer le port 8000 sur internet
+  (ou alors derrière un reverse proxy avec authentification).
+- La langue envoyée à l'API doit être un code ISO 639-2 (`fra`, `fre`, `eng`, `und`...), sinon la requête est refusée (422).
+
 ## Prompt ChatGpt
 ```
 Je voudrais une application web qui me permette d'analyser le contenu d'un répertoire, et pour chaque fichier vidéo trouvé, elle affichera la langue inscrite dans les metadonnées des pistes audio. 

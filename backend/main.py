@@ -10,7 +10,8 @@ from contextlib import contextmanager
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
+import pycountry
 from datetime import datetime
 from pathlib import Path
 
@@ -407,6 +408,18 @@ def get_tracks(file_id: int):
 class SetLangModel(BaseModel):
     language: str
     track: int = 0  # index relatif de la piste audio (a:N)
+
+    @field_validator('language')
+    @classmethod
+    def check_language(cls, value):
+        """La langue est écrite telle quelle dans le fichier vidéo : seul un code
+        ISO 639-2 (« fra », ou sa forme bibliographique « fre ») est accepté"""
+        code = value.strip().lower()
+        if len(code) != 3 or not (
+            pycountry.languages.get(alpha_3=code) or pycountry.languages.get(bibliographic=code)
+        ):
+            raise ValueError('language must be an ISO 639-2 code, e.g. fra')
+        return code
 
 @app.post('/api/files/{file_id}/set_language')
 def set_language(file_id: int, model: SetLangModel):
