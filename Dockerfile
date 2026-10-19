@@ -1,7 +1,7 @@
 FROM python:3.11-slim
 
-# Install ffmpeg and build deps
-RUN apt-get update && apt-get install -y ffmpeg && rm -rf /var/lib/apt/lists/*
+# ffmpeg sans les paquets recommandés (inutiles ici et très lourds)
+RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
@@ -19,6 +19,10 @@ ENV VIDEOS_DIR=/videos
 ENV DB_PATH=/data/app.db
 
 EXPOSE 8000
+
+# curl n'est pas dans l'image slim : la sonde utilise Python
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/version', timeout=4)" || exit 1
 
 # Utilisateur de l'application ; UID/GID ajustés au démarrage via PUID/PGID
 ENV PUID=1000
