@@ -87,8 +87,10 @@ function renderPagination(total, page, pageSize) {
     li.innerHTML = `<a class="pagination-link${i === page ? ' is-current' : ''}" data-page="${i}">${i}</a>`;
     paginationList.appendChild(li);
   }
-  document.getElementById('prevPage').disabled = (page === 1);
-  document.getElementById('nextPage').disabled = (page === pageCount || pageCount === 0);
+  // .disabled n'existe pas sur un <a> : l'attribut sert au style Bulma,
+  // les bornes sont vérifiées dans les handlers
+  document.getElementById('prevPage').toggleAttribute('disabled', page <= 1);
+  document.getElementById('nextPage').toggleAttribute('disabled', page >= pageCount);
 
   // Ajout des événements
   paginationList.querySelectorAll('.pagination-link').forEach(link => {
@@ -103,8 +105,8 @@ function renderPagination(total, page, pageSize) {
       renderList();
     }
   };
+  // pageCount est celui de la liste filtrée, pas de tous les fichiers
   document.getElementById('nextPage').onclick = () => {
-    const pageCount = Math.ceil(allFiles.length / pageSize);
     if (currentPage < pageCount) {
       currentPage++;
       renderList();
