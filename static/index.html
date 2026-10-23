@@ -5,11 +5,13 @@
   <meta charset="UTF-8">
   <title>Analyseur de vidéos</title>
   <link rel="icon" type="image/png" href="/static/favicon96.png">
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bulma@0.9.4/css/bulma.min.css">
+  <!-- Bulma 0.9.4 embarqué : l'interface doit fonctionner sur un NAS sans accès internet -->
+  <link rel="stylesheet" href="/static/vendor/bulma.min.css">
   <link rel="stylesheet" href="/static/styles.css">
 </head>
 
-<body>
+<!-- Thème par défaut jusqu'au chargement du thème enregistré (évite un flash blanc) -->
+<body data-theme="plex">
   <section class="section">
     <div class="container">
 
@@ -21,7 +23,7 @@
         <div class="level-right">
           <div class="is-flex is-align-items-center">
             <p class="heading mr-2">Version</p>
-            <p class="heading has-text-white has-background-dark" id="appVersion">__APP_VERSION__</p>
+            <p class="heading has-text-white has-background-dark" id="appVersion"></p>
           </div>
           <div class="select ml-4">
             <select id="themeSelector">
@@ -110,18 +112,6 @@
       </div>
 
       <!-- Templates -->
-      <script type="text/template" id="list-item-template">
-      <a class="file-item" data-id="{{id}}">
-        <span class="icon-text">
-          <span>{{filename}}</span>
-          <span class="tags ml-2">
-            {{status}}
-            {{language}}
-          </span>
-        </span>
-      </a>
-    </script>
-
       <script type="text/template" id="detail-template">
       <!-- Les emplacements data-field sont remplis en texte par app.js (jamais en HTML) -->
       <h3 class="title is-5" data-field="filename"></h3>

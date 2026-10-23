@@ -1,41 +1,12 @@
 body {
     font-family: Arial, Helvetica, sans-serif;
-    margin: 20px
+    /* Pas de marge : le fond du thème couvre toute la fenêtre (.section gère l'espacement) */
+    margin: 0;
+    min-height: 100vh
 }
 
 .container {
     max-width: 900px
-}
-
-.file-list {
-    list-style: none;
-    padding: 0
-}
-
-.file-item {
-    display: flex;
-    gap: 12px;
-    padding: 8px;
-    border-bottom: 1px solid #ddd;
-    cursor: pointer
-}
-
-.status {
-    width: 20px
-}
-
-.pane {
-    border: 1px solid #ccc;
-    padding: 12px;
-    margin-top: 12px
-}
-
-.hidden {
-    display: none
-}
-
-.controls {
-    margin-bottom: 12px
 }
 
 .detail-pane {
@@ -45,59 +16,136 @@ body {
   overflow-y: auto;
 }
 
-/* Base */
+/* -------------------------
+   Thèmes : chaque thème ne définit que des couleurs,
+   appliquées ensuite aux composants Bulma ci-dessous
+   ------------------------- */
+body[data-theme="plex"] {
+  --bg: #1f1f1f;
+  --surface: #2b2b2b;
+  --surface-alt: #313131;
+  --surface-hover: #3b3b3b;
+  --border: #404040;
+  --text: #eaeaea;
+  --muted: #a0a0a0;
+  --accent: #e5a00d;
+  --on-accent: #1f1f1f;
+}
+
+body[data-theme="sonarr"] {
+  --bg: #1b2631;
+  --surface: #24323f;
+  --surface-alt: #2a3a48;
+  --surface-hover: #314557;
+  --border: #3a4f62;
+  --text: #e1e8ee;
+  --muted: #9fb0bf;
+  --accent: #35c5f4;
+  --on-accent: #10202c;
+}
+
+body[data-theme="jellyfin"] {
+  --bg: #101010;
+  --surface: #1c1c1c;
+  --surface-alt: #222222;
+  --surface-hover: #2c2c2c;
+  --border: #333333;
+  --text: #eeeeee;
+  --muted: #999999;
+  --accent: #aa5cc3;
+  --on-accent: #ffffff;
+}
+
+body[data-theme] {
+  background: var(--bg);
+  color: var(--text);
+}
+
+body[data-theme] .box {
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: 0 0 0 1px var(--border);
+}
+
+body[data-theme] .title,
+body[data-theme] strong,
+body[data-theme] .table th {
+  color: var(--text);
+}
+
+body[data-theme] .heading {
+  color: var(--muted);
+}
+
+body[data-theme] code {
+  background: var(--bg);
+  color: var(--accent);
+}
+
+/* Tableau des fichiers */
+body[data-theme] .table {
+  background: transparent;
+  color: var(--text);
+}
+
+body[data-theme] .table td,
+body[data-theme] .table th {
+  border-color: var(--border);
+}
+
+body[data-theme] .table.is-striped tbody tr:not(.is-selected):nth-child(even) {
+  background: var(--surface-alt);
+}
+
+/* Champs de recherche et listes déroulantes */
+body[data-theme] .input,
+body[data-theme] .select select {
+  background: var(--bg);
+  border-color: var(--border);
+  color: var(--text);
+}
+
+body[data-theme] .input::placeholder {
+  color: var(--muted);
+}
+
+body[data-theme] .select:not(.is-multiple):not(.is-loading)::after {
+  border-color: var(--accent);
+}
+
+/* Pagination */
+body[data-theme] .pagination-link,
+body[data-theme] .pagination-previous,
+body[data-theme] .pagination-next {
+  border-color: var(--border);
+  color: var(--text);
+}
+
+body[data-theme] .pagination-link.is-current {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--on-accent);
+}
+
+body[data-theme] .radio:hover {
+  color: var(--accent);
+}
+
+/* Lien d'un fichier dans la liste */
 .file-item {
   display: flex;
+  gap: 12px;
   justify-content: space-between;
   align-items: center;
   padding: 0.5rem;
   border-radius: 4px;
+  color: var(--accent);
   cursor: pointer;
 }
 
 .file-item:hover {
-  opacity: 0.9;
-}
-
-
-/* Thème Plex */
-body[data-theme="plex"] {
-  background: #1c1c1c;
-  color: #f5c518;
-}
-
-/* Thème Plex */
-body[data-theme="plex"] .file-item {
-  background: #2c2c2c;
-  color: #f5c518;
-}
-
-body[data-theme="plex"] .file-item:hover {
-  background: #3a3a3a;
-}
-
-/* Thème Sonarr */
-body[data-theme="sonarr"] {
-  background: #0b1e2d;
-  color: #00aaff;
-}
-body[data-theme="sonarr"] .file-item:hover {
-  background: #12344a;
-}
-
-/* Thème Jellyfin */
-body[data-theme="jellyfin"] {
-  background: #0d1117;
-  color: #9b59b6;
-}
-body[data-theme="jellyfin"] .file-item:hover {
-  background: #1a1f27;
-}
-
-/* Pour que les box gardent un contraste lisible */
-body[data-theme] .box {
-  background: #fff;
-  color: #000;
+  background: var(--surface-hover);
+  color: var(--accent);
 }
 
 /* Tags toujours lisibles */

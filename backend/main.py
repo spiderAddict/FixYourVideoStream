@@ -12,12 +12,13 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, field_validator
 import pycountry
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 VIDEOS_DIR = os.environ.get("VIDEOS_DIR", "/videos")
 DB_PATH = os.environ.get("DB_PATH", "app.db")
-VERSION_FILE = os.path.join(os.path.dirname(os.path.dirname(__file__)), "VERSION")
+# Version injectée au build de l'image (tag git, voir Dockerfile et la CI)
+APP_VERSION = os.environ.get("APP_VERSION") or "unknown"
 
 VIDEO_EXTS = {'.mp4', '.mkv', '.avi', '.mov', '.webm', '.m4v'}
 # Conteneurs dans lesquels ffmpeg ne sait pas écrire la langue d'une piste audio
@@ -35,15 +36,9 @@ logger = logging.getLogger(__name__)
 app = FastAPI()
 app.mount('/static', StaticFiles(directory="static", html=True), name="static")
 
-def get_version():
-    """Retourne la version de l'application"""
-    try:
-        if os.path.exists(VERSION_FILE):
-            with open(VERSION_FILE, 'r') as f:
-                return f.read().strip()
-    except:
-        pass
-    return "unknown"
+def now_iso():
+    """Horodatage UTC au format ISO 8601"""
+    return datetime.now(timezone.utc).isoformat()
 
 @app.get("/")
 def root():
@@ -52,7 +47,7 @@ def root():
 @app.get("/api/version")
 def get_app_version():
     """API endpoint pour obtenir la version de l'application"""
-    return {'version': get_version()}
+    return {'version': APP_VERSION}
 
 # -------------------------
 # Base de données SQLite
@@ -83,7 +78,7 @@ def get_file_path(file_id):
     return r['path'] if r else None
 
 def init_db():
-    logger.info(f"Initialisation de la base")
+    logger.info("Initialisation de la base")
 
     with db() as conn:
         init_schema(conn)
@@ -169,7 +164,7 @@ def save_analysis(conn, file_id, lang, error):
     """Enregistre le résultat d'une analyse (réussie ou en erreur)"""
     conn.execute(
         'UPDATE files SET language=?, analyzed_at=?, analysis_error=? WHERE id=?',
-        (lang, datetime.utcnow().isoformat(), error, file_id)
+        (lang, now_iso(), error, file_id)
     )
 
 def file_status(row):
@@ -322,7 +317,7 @@ def run_analysis_job(files):
     finally:
         with job_lock:
             job['running'] = False
-            job['finished_at'] = datetime.utcnow().isoformat()
+            job['finished_at'] = now_iso()
             logger.info(f"Analyse en masse terminée: {job['done']}/{job['total']}, {job['errors']} erreur(s)")
 
 def start_analysis_job(kind, query):
@@ -333,7 +328,7 @@ def start_analysis_job(kind, query):
         with db() as conn:
             files = conn.execute(query).fetchall()
         job.update(running=True, kind=kind, total=len(files), done=0, errors=0,
-                   error=None, started_at=datetime.utcnow().isoformat(), finished_at=None)
+                   error=None, started_at=now_iso(), finished_at=None)
         snapshot = dict(job)
     threading.Thread(target=run_analysis_job, args=(files,), daemon=True).start()
     return snapshot
@@ -483,7 +478,9 @@ def set_language(file_id: int, model: SetLangModel):
             )
             raise HTTPException(status_code=500, detail='ffmpeg output is missing streams')
         output_tracks = audio_tracks(output_streams)
-        if output_tracks[model.track]['language'] != model.language:
+        # « und » (indéterminée) est la valeur par défaut des conteneurs : ffmpeg
+        # n'écrit alors aucune balise et ffprobe ne renvoie pas de langue
+        if (output_tracks[model.track]['language'] or 'und') != model.language:
             logger.error(f"Langue non écrite dans la sortie ffmpeg pour {src}: {output_tracks[model.track]}")
             raise HTTPException(status_code=500, detail='Language was not written to the output file')
 
