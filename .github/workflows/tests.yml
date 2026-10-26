@@ -2,7 +2,8 @@ name: Tests
 
 on:
   push:
-    branches: ['**']
+    # Sur main, ces tests sont lancés par le workflow de publication
+    branches-ignore: ['main']
   pull_request:
   # Appelé par le workflow de publication avant le build de l'image
   workflow_call:
@@ -29,3 +30,17 @@ jobs:
         run: ruff check .
       - name: Tests
         run: pytest -q
+
+  commitlint:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      # semantic-release calcule la version à partir des messages de commit
+      - name: Lint commits
+        uses: wagoid/commitlint-github-action@v6
+        with:
+          failOnErrors: true
+          failOnWarnings: false

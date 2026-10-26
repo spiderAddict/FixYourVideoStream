@@ -22,8 +22,8 @@ docker run -d -p 8000:8000 \
   fixyourvideostream
 ```
 
-Puis ouvrir http://localhost:8000. Les images publiées par la CI (à chaque tag `vX.Y.Z`) sont sur
-`ghcr.io/spideraddict/fixyourvideostream:<version>`.
+Puis ouvrir http://localhost:8000. Les images publiées par la CI (à chaque release `vX.Y.Z`) sont sur
+`ghcr.io/spideraddict/fixyourvideostream:<version>` (ou `:latest`).
 
 Avec Docker Compose (NAS) :
 
@@ -112,8 +112,11 @@ ruff check .
 pytest
 ```
 
-Les tests génèrent leurs propres vidéos avec ffmpeg. La CI (workflow *Tests*) lance `ruff` et `pytest` sur
-chaque push et chaque pull request ; le workflow *Build And Push Docker Image* publie l'image à chaque tag `v*`.
+Les tests génèrent leurs propres vidéos avec ffmpeg. La CI (workflow *Tests*) lance `ruff`, `pytest` et
+commitlint sur chaque push et chaque pull request. Sur `main`, le workflow *Build And Push Docker Image* relance ces
+contrôles, puis semantic-release calcule la version à partir des messages de commit
+([Conventional Commits](https://www.conventionalcommits.org/)), crée le tag et la release GitHub, et l'image est
+publiée. Renovate propose chaque lundi les mises à jour de dépendances.
 
 ## Origine du projet
 
