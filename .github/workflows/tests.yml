@@ -4,6 +4,8 @@ on:
   push:
     branches: ['**']
   pull_request:
+  # Appelé par le workflow de publication avant le build de l'image
+  workflow_call:
 
 jobs:
 

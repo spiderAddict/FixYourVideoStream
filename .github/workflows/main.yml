@@ -12,8 +12,13 @@ env:
 
 jobs:
 
+  tests:
+    uses: ./.github/workflows/tests.yml
+
   docker:
     runs-on: ubuntu-latest
+    # Pas d'image publiée si le lint ou les tests échouent
+    needs: tests
     permissions:
       contents: read
       packages: write
