@@ -3,7 +3,7 @@ testpaths = ["tests"]
 pythonpath = ["."]
 
 [tool.ruff]
-target-version = "py311"
+target-version = "py312"
 
 [tool.ruff.lint]
 # Erreurs de syntaxe, noms indéfinis, imports et variables inutilisés

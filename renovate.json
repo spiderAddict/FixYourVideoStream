@@ -1,0 +1,49 @@
+{
+  "extends": [
+    "config:recommended"
+  ],
+
+  "timezone": "Europe/Paris",
+
+  "schedule": ["before 6am on monday"],
+
+  "labels": ["dependencies"],
+
+  "rangeStrategy": "bump",
+
+  "prConcurrentLimit": 5,
+
+  "rebaseWhen": "behind-base-branch",
+
+  "packageRules": [
+    {
+      "matchUpdateTypes": ["patch"],
+      "semanticCommitType": "fix"
+    },
+    {
+      "matchUpdateTypes": ["minor", "major"],
+      "semanticCommitType": "fix"
+    },
+    {
+      "description": "Auto-merge safe updates",
+      "matchUpdateTypes": ["patch", "minor"],
+      "automerge": true,
+      "automergeType": "pr"
+    },
+    {
+      "description": "Group Python deps",
+      "matchManagers": ["pip_requirements"],
+      "groupName": "python dependencies"
+    },
+    {
+      "description": "Group Docker deps",
+      "matchManagers": ["dockerfile", "docker-compose"],
+      "groupName": "docker dependencies"
+    },
+    {
+      "description": "Do not auto-merge major updates",
+      "matchUpdateTypes": ["major"],
+      "automerge": false
+    }
+  ]
+}

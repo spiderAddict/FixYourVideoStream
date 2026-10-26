@@ -2,8 +2,11 @@ name: Tests
 
 on:
   push:
-    branches: ['**']
+    # Sur main, ces tests sont lancés par le workflow de publication
+    branches-ignore: ['main']
   pull_request:
+  # Appelé par le workflow de publication avant le build de l'image
+  workflow_call:
 
 jobs:
 
@@ -11,12 +14,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           # Même version que l'image Docker
-          python-version: '3.11'
+          python-version: '3.12'
           cache: pip
           cache-dependency-path: requirements-dev.txt
       - name: Install ffmpeg
@@ -27,3 +30,17 @@ jobs:
         run: ruff check .
       - name: Tests
         run: pytest -q
+
+  commitlint:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      # semantic-release calcule la version à partir des messages de commit
+      - name: Lint commits
+        uses: wagoid/commitlint-github-action@v6
+        with:
+          failOnErrors: true
+          failOnWarnings: false
