@@ -3,6 +3,8 @@
 
 <head>
   <meta charset="UTF-8">
+  <!-- Sans viewport, un téléphone affiche la page à la largeur d'un écran de bureau, dézoomée -->
+  <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Analyseur de vidéos</title>
   <link rel="icon" type="image/png" href="/static/favicon96.png">
   <!-- Bulma 0.9.4 embarqué : l'interface doit fonctionner sur un NAS sans accès internet -->
@@ -16,113 +18,98 @@
     <div class="container">
 
       <!-- Header -->
-      <div class="level">
-        <div class="level-left">
-          <!-- left side intentionally left empty -->
+      <div class="app-header mb-4">
+        <div class="is-flex is-align-items-center">
+          <p class="heading mr-2 mb-0">Version</p>
+          <p class="heading has-text-white has-background-dark mb-0" id="appVersion"></p>
         </div>
-        <div class="level-right">
-          <div class="is-flex is-align-items-center">
-            <p class="heading mr-2">Version</p>
-            <p class="heading has-text-white has-background-dark" id="appVersion"></p>
+        <div class="select">
+          <select id="themeSelector" aria-label="Thème">
+            <option value="plex">Plex</option>
+            <option value="sonarr">Sonarr</option>
+            <option value="jellyfin">Jellyfin</option>
+          </select>
+        </div>
+      </div>
+      <div class="buttons actions">
+        <button class="button is-info" id="rescan">Scan pour nouveaux</button>
+        <button class="button is-link" id="analyzeNew">Analyser nouveaux</button>
+        <button class="button is-warning" id="analyzeAll">Analyser tout</button>
+      </div>
+
+      <!-- Liste des fichiers ; le détail s'ouvre dans une modale par-dessus -->
+      <div class="box">
+        <h2 class="title is-4">Fichiers vidéos</h2>
+        <div class="filters mb-3">
+          <div class="control filter-name">
+            <input id="filterName" class="input" type="text" placeholder="Rechercher par nom...">
           </div>
-          <div class="select ml-4">
-            <select id="themeSelector">
-              <option value="plex">Plex</option>
-              <option value="sonarr">Sonarr</option>
-              <option value="jellyfin">Jellyfin</option>
+          <div class="select">
+            <select id="filterStatus" aria-label="Statut">
+              <option value="">Tous les statuts</option>
+              <option value="analyzed">Analysé</option>
+              <option value="not_analyzed">Non analysé</option>
+              <option value="error">En erreur</option>
+            </select>
+          </div>
+          <div class="select">
+            <!-- Options générées par app.js à partir des langues présentes en base -->
+            <select id="filterLang" aria-label="Langue">
+              <option value="">Toutes les langues</option>
             </select>
           </div>
         </div>
-      </div>
-      <div class="level">
-        <div class="level-right buttons">
-          <button class="button is-info" id="rescan">Scan pour nouveaux</button>
-          <button class="button is-link" id="analyzeNew">Analyser nouveaux</button>
-          <button class="button is-warning" id="analyzeAll">Analyser tout</button>
+        <div class="table-container">
+          <table class="table is-fullwidth is-striped file-table">
+            <thead>
+              <tr>
+                <th>Nom</th>
+                <th>Statut</th>
+                <th>Langue</th>
+              </tr>
+            </thead>
+            <tbody id="fileList"></tbody>
+          </table>
         </div>
-      </div>
-
-      <!-- Layout en colonnes -->
-      <div class="columns">
-        <!-- Colonne gauche : liste -->
-        <div class="column is-half">
-          <div class="box">
-            <h2 class="title is-4">Fichiers vidéos</h2>
-            <div class="level mb-3">
-              <div class="level-left">
-                <div class="field has-addons mr-2">
-                  <div class="control is-expanded">
-                    <input id="filterName" class="input" type="text" placeholder="Rechercher par nom...">
-                  </div>
-                </div>
-                <div class="select mr-2">
-                  <select id="filterStatus">
-                    <option value="">Tous les statuts</option>
-                    <option value="analyzed">Analysé</option>
-                    <option value="not_analyzed">Non analysé</option>
-                    <option value="error">En erreur</option>
-                  </select>
-                </div>
-                <div class="select">
-                  <!-- Options générées par app.js à partir des langues présentes en base -->
-                  <select id="filterLang">
-                    <option value="">Toutes les langues</option>
-                  </select>
-                </div>
-              </div>
+        <div class="list-footer mt-2">
+          <p class="is-size-7 list-count" id="listCount"></p>
+          <div class="list-more">
+            <div class="select">
+              <select id="pageSize" aria-label="Nombre de films ajoutés à chaque clic">
+                <option value="10">10</option>
+                <option value="25">25</option>
+                <option value="50">50</option>
+                <option value="100">100</option>
+              </select>
             </div>
-            <div class="table-container">
-              <table class="table is-fullwidth is-striped">
-                <thead>
-                  <tr>
-                    <th>Nom</th>
-                    <th>Statut</th>
-                    <th>Langue</th>
-                  </tr>
-                </thead>
-                <tbody id="fileList"></tbody>
-              </table>
-            </div>
-            <div class="level mt-2">
-              <div class="level-left">
-                <div class="select">
-                  <select id="pageSize">
-                    <option value="10">10</option>
-                    <option value="25">25</option>
-                    <option value="50">50</option>
-                    <option value="100">100</option>
-                  </select>
-                </div>
-              </div>
-              <div class="level-right">
-                <nav class="pagination" role="navigation" aria-label="pagination">
-                  <a class="pagination-previous" id="prevPage">Précédent</a>
-                  <a class="pagination-next" id="nextPage">Suivant</a>
-                  <ul class="pagination-list" id="paginationList"></ul>
-                </nav>
-              </div>
-            </div>
+            <button class="button is-link" id="loadMore">Plus de films</button>
           </div>
         </div>
+      </div>
 
-        <!-- Colonne droite : détail -->
-        <div class="column is-half">
-          <div id="detailPane" class="box is-hidden detail-pane"></div>
+      <!-- Modale de détail, par-dessus la liste quel que soit l'écran -->
+      <div id="detailModal" class="modal" role="dialog" aria-modal="true">
+        <div class="modal-background" data-close-detail></div>
+        <div class="modal-content detail-modal">
+          <div class="box detail-box">
+            <button class="delete is-large detail-close" aria-label="Fermer" data-close-detail></button>
+            <div id="detailPane"></div>
+          </div>
         </div>
       </div>
 
       <!-- Templates -->
       <script type="text/template" id="detail-template">
       <!-- Les emplacements data-field sont remplis en texte par app.js (jamais en HTML) -->
-      <h3 class="title is-5" data-field="filename"></h3>
+      <h3 class="title is-5 detail-title" data-field="filename"></h3>
       <div class="content">
-        <p><strong>Path :</strong> <code data-field="path"></code></p>
+        <p><strong>Path :</strong> <code class="detail-path" data-field="path"></code></p>
         <p><strong>Analysé :</strong> <span data-field="analyzed"></span></p>
         <p><strong>Langue :</strong> <span data-field="language"></span></p>
         <p><strong>Pistes audio :</strong></p>
         <div id="tracks"><p class="is-size-7">Lecture des pistes...</p></div>
       </div>
-      <div class="buttons">
+      <div class="buttons detail-actions">
         <button id="analyze" class="button is-link">🔄 Analyser</button>
         <button id="setFr" class="button is-warning" disabled>🇫🇷 Forcer FR sur la piste sélectionnée</button>
       </div>

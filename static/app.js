@@ -81,43 +81,22 @@ function refreshLanguageFilter(){
 }
 
 let allFiles = [];
-let currentPage = 1;
+// Nombre de lignes ajoutées à chaque clic sur « Plus de films »
 let pageSize = 10;
+// Nombre de lignes affichées ; conservé lors d'un rechargement de la liste
+let visibleCount = pageSize;
 
-function renderPagination(total, page, pageSize) {
-  const pageCount = Math.ceil(total / pageSize);
-  const paginationList = document.getElementById('paginationList');
-  paginationList.innerHTML = '';
-  for (let i = 1; i <= pageCount; i++) {
-    const li = document.createElement('li');
-    li.innerHTML = `<a class="pagination-link${i === page ? ' is-current' : ''}" data-page="${i}">${i}</a>`;
-    paginationList.appendChild(li);
-  }
-  // .disabled n'existe pas sur un <a> : l'attribut sert au style Bulma,
-  // les bornes sont vérifiées dans les handlers
-  document.getElementById('prevPage').toggleAttribute('disabled', page <= 1);
-  document.getElementById('nextPage').toggleAttribute('disabled', page >= pageCount);
+// Repart du premier lot quand le contenu de la liste change (filtre, taille de lot)
+function resetVisibleCount() {
+  visibleCount = pageSize;
+  renderList();
+}
 
-  // Ajout des événements
-  paginationList.querySelectorAll('.pagination-link').forEach(link => {
-    link.onclick = (e) => {
-      currentPage = parseInt(e.target.dataset.page);
-      renderList();
-    };
-  });
-  document.getElementById('prevPage').onclick = () => {
-    if (currentPage > 1) {
-      currentPage--;
-      renderList();
-    }
-  };
-  // pageCount est celui de la liste filtrée, pas de tous les fichiers
-  document.getElementById('nextPage').onclick = () => {
-    if (currentPage < pageCount) {
-      currentPage++;
-      renderList();
-    }
-  };
+function renderListFooter(shown, total) {
+  document.getElementById('listCount').textContent = total === 0
+    ? 'Aucun film'
+    : `${shown} / ${total} film(s) affiché(s)`;
+  document.getElementById('loadMore').classList.toggle('is-hidden', shown >= total);
 }
 
 function getFilteredFiles() {
@@ -143,17 +122,11 @@ function renderList() {
   const list = document.getElementById('fileList');
   list.innerHTML = "";
   const filteredFiles = getFilteredFiles();
-  // Après un rechargement, la page courante peut ne plus exister (fichiers retirés)
-  const pageCount = Math.max(1, Math.ceil(filteredFiles.length / pageSize));
-  currentPage = Math.min(currentPage, pageCount);
-  const start = (currentPage - 1) * pageSize;
-  const end = start + pageSize;
-  const files = filteredFiles.slice(start, end);
+  const files = filteredFiles.slice(0, visibleCount);
 
   for (let f of files) {
     const link = el('a', 'file-item', f.filename);
     link.dataset.id = f.id;
-    link.style.cursor = 'pointer';
     link.onclick = () => showDetail(f);
 
     const row = document.createElement('tr');
@@ -162,41 +135,51 @@ function renderList() {
     }
     list.appendChild(row);
   }
-  renderPagination(filteredFiles.length, currentPage, pageSize);
+  renderListFooter(files.length, filteredFiles.length);
 }
 
 // Mets à jour la liste quand on change un filtre
-document.addEventListener('DOMContentLoaded', () => {  
+document.addEventListener('DOMContentLoaded', () => {
   const pageSizeSelect = document.getElementById('pageSize');
-  if (pageSizeSelect) {
-    pageSizeSelect.value = pageSize;
-    pageSizeSelect.onchange = (e) => {
-      pageSize = parseInt(e.target.value);
-      currentPage = 1;
-      renderList();
-    };
-  }
-  document.getElementById('filterStatus').onchange = () => {
-    currentPage = 1;
+  pageSizeSelect.value = pageSize;
+  pageSizeSelect.onchange = (e) => {
+    pageSize = parseInt(e.target.value);
+    resetVisibleCount();
+  };
+  document.getElementById('loadMore').onclick = () => {
+    visibleCount += pageSize;
     renderList();
   };
-  document.getElementById('filterLang').onchange = () => {
-    currentPage = 1;
-    renderList();
-  };
-  document.getElementById('filterName').oninput = () => {
-    currentPage = 1;
-    renderList();
-  };
+  document.getElementById('filterStatus').onchange = resetVisibleCount;
+  document.getElementById('filterLang').onchange = resetVisibleCount;
+  document.getElementById('filterName').oninput = resetVisibleCount;
+
+  // Fermeture de la modale : fond, croix, touche Échap
+  document.querySelectorAll('[data-close-detail]').forEach(e => { e.onclick = closeDetail; });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && currentDetailId !== null) closeDetail();
+  });
 });
 
-// Id du fichier affiché dans le panneau de détail
+// Id du fichier affiché dans la modale de détail
 let currentDetailId = null;
+
+function openDetailModal() {
+  document.getElementById('detailModal').classList.add('is-active');
+  // Bloque le défilement de la liste sous la modale
+  document.documentElement.classList.add('is-clipped');
+}
+
+function closeDetail() {
+  currentDetailId = null;
+  document.getElementById('detailModal').classList.remove('is-active');
+  document.documentElement.classList.remove('is-clipped');
+}
 
 async function showDetail(file){
   currentDetailId = file.id;
   const pane = document.getElementById('detailPane');
-  pane.classList.remove('is-hidden');
+  openDetailModal();
 
   // Le template est statique ; les données sont ensuite posées en texte dans ses emplacements
   pane.innerHTML = document.getElementById('detail-template').innerHTML;
@@ -369,7 +352,7 @@ async function loadTheme(){
   document.getElementById('themeSelector').value = res.theme;
 }
 
-// Recharge la liste en gardant la page courante, et le détail ouvert à jour
+// Recharge la liste en gardant les lignes déjà affichées, et le détail ouvert à jour
 async function loadList() {
   try {
     allFiles = await api('/api/files');
@@ -388,8 +371,7 @@ async function refreshDetail() {
   if (file) {
     await showDetail(file);
   } else {
-    document.getElementById('detailPane').classList.add('is-hidden');
-    currentDetailId = null;
+    closeDetail();
   }
 }
 document.getElementById('themeSelector').onchange = async (e)=>{
