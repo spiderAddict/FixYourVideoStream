@@ -9,11 +9,153 @@ body {
     max-width: 900px
 }
 
-.detail-pane {
-  position: sticky;
-  top: 1rem;      /* distance par rapport au haut de la fenêtre */
-  max-height: calc(100vh - 2rem);
-  overflow-y: auto;
+/* -------------------------
+   Mise en page (bureau et téléphone)
+   ------------------------- */
+.app-header {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 1rem;
+}
+
+.actions {
+  justify-content: flex-end;
+}
+
+.filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.filters .filter-name {
+  flex: 1 1 14rem;
+}
+
+/* Le nom prend la place, statut et langue restent compacts */
+.file-table th:not(:first-child),
+.file-table td:not(:first-child) {
+  width: 1%;
+  white-space: nowrap;
+  text-align: center;
+}
+
+.file-table td:first-child {
+  overflow-wrap: anywhere;
+}
+
+.list-footer {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.list-count {
+  color: var(--muted);
+}
+
+.list-more {
+  display: flex;
+  gap: 0.5rem;
+}
+
+/* Modale de détail */
+.detail-modal {
+  margin: 0 0.75rem;
+  width: calc(100% - 1.5rem);
+  max-height: calc(100vh - 1.5rem);
+  max-height: calc(100dvh - 1.5rem);
+}
+
+.detail-box {
+  position: relative;
+}
+
+.detail-close {
+  position: absolute;
+  top: 1rem;
+  right: 1rem;
+}
+
+/* Laisse la place à la croix de fermeture */
+.detail-title {
+  padding-right: 2.5rem;
+  overflow-wrap: anywhere;
+}
+
+.detail-path {
+  word-break: break-all;
+}
+
+/* Pistes audio une par ligne, toutes alignées (Bulma décale les radios successifs) */
+#tracks .radio + .radio {
+  margin-left: 0;
+}
+
+.file-table td {
+  vertical-align: middle;
+}
+
+@media screen and (min-width: 769px) {
+  .detail-modal {
+    margin: 0 auto;
+    width: 720px;
+  }
+}
+
+/* Téléphone : marges réduites, commandes sur toute la largeur */
+@media screen and (max-width: 768px) {
+  .section {
+    padding: 1rem 0.75rem;
+  }
+
+  .box {
+    padding: 1rem;
+  }
+
+  .buttons.actions .button,
+  .buttons.detail-actions .button {
+    flex: 1 1 100%;
+    white-space: normal;
+    height: auto;
+  }
+
+  /* Même spécificité que la marge posée par Bulma entre les boutons */
+  .buttons.actions .button:not(:last-child):not(.is-fullwidth),
+  .buttons.detail-actions .button:not(:last-child):not(.is-fullwidth) {
+    margin-right: 0;
+  }
+
+  .filters .select,
+  .filters .select select {
+    flex: 1 1 auto;
+    width: 100%;
+  }
+
+  .list-footer {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .list-count {
+    text-align: center;
+  }
+
+  .list-more #loadMore {
+    flex: 1;
+  }
+
+  .file-table td,
+  .file-table th {
+    padding: 0.4em 0.5em;
+  }
+
+  .file-item {
+    padding: 0.25rem;
+  }
 }
 
 /* -------------------------
@@ -111,20 +253,6 @@ body[data-theme] .input::placeholder {
 
 body[data-theme] .select:not(.is-multiple):not(.is-loading)::after {
   border-color: var(--accent);
-}
-
-/* Pagination */
-body[data-theme] .pagination-link,
-body[data-theme] .pagination-previous,
-body[data-theme] .pagination-next {
-  border-color: var(--border);
-  color: var(--text);
-}
-
-body[data-theme] .pagination-link.is-current {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: var(--on-accent);
 }
 
 body[data-theme] .radio:hover {
