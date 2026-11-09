@@ -591,6 +591,7 @@ def convert_to_mkv(file_id: int):
             '-y',
             '-hide_banner',
             '-loglevel', 'error',
+            '-fflags', '+genpts',
             '-i', str(src),
 
             # Conserver tous les flux sans réencodage
