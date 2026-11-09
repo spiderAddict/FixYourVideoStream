@@ -6,7 +6,7 @@ automatiquement la bonne piste.
 
 - Liste des vidéos du dossier avec leur statut d'analyse et leur langue, filtrable par nom, statut et langue.
 - Analyse de tout le dossier, ou seulement des nouveaux fichiers, en tâche de fond avec progression.
-- Panneau de détail : pistes audio du fichier (langue, codec, piste par défaut) et passage d'une piste en français.
+- Panneau de détail : pistes audio du fichier (langue, codec, piste par défaut), passage d'une piste en français et transfo avi to mkv.
 - Trois thèmes : Plex, Sonarr, Jellyfin.
 
 Formats pris en charge : `.mp4`, `.mkv`, `.avi`, `.mov`, `.webm`, `.m4v` (sous-dossiers compris).
