@@ -514,6 +514,9 @@ def safe_move(src, dst):
     if not BACKUP_ON_SET_LANGUAGE:
         os.replace(src, dst)
         return None
+    if not os.path.exists(dst):
+        os.replace(src, dst)
+        return None
     backup_path = f"{dst}.bak"
     if os.path.exists(backup_path):
         # Un .bak existe déjà : c'est l'original d'avant toute modification, on le garde
@@ -527,3 +530,182 @@ def safe_move(src, dst):
         os.replace(backup_path, dst)
         raise
     return backup_path
+
+
+@app.post('/api/files/{file_id}/convert_to_mkv')
+def convert_to_mkv(file_id: int):
+    logger.info(f"Demande de conversion AVI -> MKV ({file_id})")
+
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute('SELECT path FROM files WHERE id=?', (file_id,))
+    r = c.fetchone()
+
+    if not r:
+        conn.close()
+        logger.error(f"Fichier non trouvé pour convert_to_mkv: id={file_id}")
+        raise HTTPException(status_code=404, detail='File not found')
+
+    src = Path(r['path'])
+
+    # Vérification de l'extension
+    if src.suffix.lower() != '.avi':
+        conn.close()
+        logger.error(f"Le fichier n'est pas un AVI: {src}")
+        raise HTTPException(
+            status_code=400,
+            detail='File is not an AVI'
+        )
+
+    # Le MKV sera créé à côté de l'AVI
+    dst = src.with_suffix('.mkv')
+
+    tmp_path = None
+
+    try:
+        # Vérifie qu'un MKV du même nom n'existe pas déjà
+        if dst.exists():
+            logger.error(f"Le fichier MKV existe déjà: {dst}")
+            raise HTTPException(
+                status_code=409,
+                detail='MKV file already exists'
+            )
+
+        source_mode = stat.S_IMODE(os.stat(src).st_mode)
+        source_size = os.path.getsize(src)
+
+        # Fichier temporaire dans le même répertoire
+        tmp_fd, tmp_path = tempfile.mkstemp(
+            dir=src.parent,
+            suffix='.mkv'
+        )
+        os.close(tmp_fd)
+
+        logger.info(
+            f"Conversion AVI -> MKV: {src} ({source_size} octets) "
+            f"-> {dst}; fichier temporaire: {tmp_path}"
+        )
+
+        cmd = [
+            'ffmpeg',
+            '-y',
+            '-hide_banner',
+            '-loglevel', 'error',
+            '-i', str(src),
+
+            # Conserver tous les flux sans réencodage
+            '-map', '0',
+            '-c', 'copy',
+
+            # Sortie MKV
+            str(tmp_path)
+        ]
+
+        res = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True
+        )
+
+        if res.returncode != 0:
+            logger.error(
+                f"Conversion AVI -> MKV en erreur: "
+                f"cmd={cmd}: {res.stderr}"
+            )
+            raise HTTPException(
+                status_code=500,
+                detail=f'ffmpeg error: {res.stderr[:500]}'
+            )
+
+        # Vérification de la taille
+        output_size = os.path.getsize(tmp_path)
+
+        if output_size == 0:
+            logger.error(
+                f"Sortie ffmpeg vide pour {src}: {tmp_path}"
+            )
+            raise HTTPException(
+                status_code=500,
+                detail='ffmpeg produced an empty file'
+            )
+
+        # Validation avec ffprobe
+        probe_cmd = [
+            'ffprobe',
+            '-v', 'error',
+            '-show_entries', 'stream=index',
+            '-of', 'json',
+            str(tmp_path)
+        ]
+
+        probe_res = subprocess.run(
+            probe_cmd,
+            capture_output=True,
+            text=True
+        )
+
+        if probe_res.returncode != 0:
+            logger.error(
+                f"Validation ffprobe échouée pour {tmp_path}: "
+                f"{probe_res.stderr}"
+            )
+            raise HTTPException(
+                status_code=500,
+                detail='ffprobe validation failed'
+            )
+
+        probe_data = json.loads(probe_res.stdout)
+
+        if not probe_data.get('streams'):
+            logger.error(
+                f"Aucun flux détecté dans la sortie ffmpeg: {tmp_path}"
+            )
+            raise HTTPException(
+                status_code=500,
+                detail='ffmpeg produced a file without streams'
+            )
+
+        # Conserver les permissions du fichier source
+        os.chmod(tmp_path, source_mode)
+
+        # Déplacement atomique du MKV final
+        safe_move(tmp_path, dst)
+
+        logger.info(
+            f"Conversion réussie: {src} -> {dst} "
+            f"({source_size} -> {output_size} octets)"
+        )
+
+        # Suppression de l'ancien AVI
+        os.remove(src)
+
+        # Mise à jour du chemin dans la DB
+        c.execute(
+            'UPDATE files SET path=?, filename=? WHERE id=?',
+            (str(dst), dst.name, file_id)
+        )
+        conn.commit()
+
+    except HTTPException:
+        raise
+
+    except Exception as exc:
+        logger.exception(
+            f"Échec de la conversion AVI -> MKV pour {src}"
+        )
+        raise HTTPException(
+            status_code=500,
+            detail='Unable to convert file to MKV'
+        ) from exc
+
+    finally:
+        if tmp_path and os.path.exists(tmp_path):
+            os.remove(tmp_path)
+
+        conn.close()
+
+    return {
+        'status': 'ok',
+        'source': str(src),
+        'output': str(dst)
+    }

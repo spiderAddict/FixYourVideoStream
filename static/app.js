@@ -197,6 +197,24 @@ async function showDetail(file){
   }
   field('language').append(languageTag(file.language, 'Inconnue'));
 
+  if (file.path.toLowerCase().endsWith('.avi')) {
+    const convertButton = el('button', 'button is-info', 'Convertir en MKV');
+    convertButton.type = 'button';
+    convertButton.onclick = async () => {
+      try {
+        showLoader();
+        await api(`/api/files/${file.id}/convert_to_mkv`, {method:'POST'});
+        await loadList();
+        showNotification('Conversion en MKV terminée.', 'success');
+      } catch (e) {
+        showNotification("Erreur : " + e.message, "error");
+      } finally {
+        hideLoader();
+      }
+    };
+    pane.querySelector('.detail-actions').appendChild(convertButton);
+  }
+
   // Analyse si jamais faite, réanalyse sinon
   const analyzeUrl = file.analyzed_at
     ? `/api/files/${file.id}/reanalyze`
