@@ -76,6 +76,7 @@ Les variables sont lues au démarrage : après une modification, recréer le con
 - **Forcer FR** : écrit `fra` sur la piste choisie, en remuxant le fichier sans réencodage (`ffmpeg -c copy`).
   L'original n'est remplacé que si le nouveau fichier contient les mêmes flux et la bonne langue.
   Refusé pour les `.avi`, dont le format ne permet pas de stocker la langue des pistes.
+- **Convertir en MKV** : pour les fichiers avi permet de les convertir en mkv
 
 ## Sécurité
 
